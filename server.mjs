@@ -61,7 +61,7 @@ export async function handleRequest(req, res) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  createServer(handleRequest).listen(port, () => {
+  createServer(handleRequest).listen(port, "127.0.0.1", () => {
     console.log(`Server ready: http://127.0.0.1:${port}`);
   });
 }
