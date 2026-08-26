@@ -58,7 +58,7 @@ function reducer(state: PlannerState, action: Action): PlannerState {
     case "intent":
       return { ...state, intent: action.intent, stage: action.intent.needsClarification ? "clarifying" : state.stage };
     case "ready":
-      return { ...state, stage: "ready", intent: action.intent, variants: action.variants, selectedId: action.variants[0]?.id ?? null, modelNames: [...state.modelNames, ...action.models], error: null };
+      return { ...state, stage: "ready", intent: action.intent, variants: action.variants, selectedId: null, modelNames: [...state.modelNames, ...action.models], error: null };
     case "select":
       return { ...state, selectedId: action.id };
     case "items":

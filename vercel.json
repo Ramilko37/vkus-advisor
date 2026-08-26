@@ -1,6 +1,9 @@
 {
   "buildCommand": "pnpm build",
   "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/results", "destination": "/index.html" }
+  ],
   "functions": {
     "api/**/*.mjs": {
       "maxDuration": 60
