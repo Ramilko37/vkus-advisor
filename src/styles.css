@@ -735,7 +735,7 @@ button:disabled {
   --deck-drag: 0px;
   --deck-drag-side: 0px;
   --deck-drag-rotate: 0deg;
-  min-height: 28.95rem;
+  min-height: 32.1rem;
   margin: 0 -0.875rem 0.85rem;
   overflow: visible;
   perspective: 58rem;
@@ -802,13 +802,13 @@ button:disabled {
   position: absolute;
   top: 1.05rem;
   left: 50%;
-  width: min(74vw, 21.25rem);
-  height: 27.25rem;
+  width: min(80vw, 23rem);
+  height: 30.1rem;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
-  padding: 1.1rem;
+  padding: 1.2rem;
   background:
     linear-gradient(145deg, #ffffff, #f9fcf7);
   box-shadow: var(--shadow-card);
@@ -827,9 +827,9 @@ button:disabled {
   clip-path: inset(0 0 18% 0 round var(--radius-card));
   transform:
     translateX(calc(-50% - min(41vw, 9.8rem) + var(--deck-drag-side)))
-    translateY(1.7rem)
+    translateY(2rem)
     rotate(-12deg)
-    scale(0.88);
+    scale(0.86);
 }
 .variant-card[data-position="1"] {
   z-index: 2;
@@ -839,9 +839,9 @@ button:disabled {
   clip-path: inset(0 0 18% 0 round var(--radius-card));
   transform:
     translateX(calc(-50% + min(41vw, 9.8rem) + var(--deck-drag-side)))
-    translateY(1.7rem)
+    translateY(2rem)
     rotate(12deg)
-    scale(0.88);
+    scale(0.86);
 }
 .variant-card.active {
   z-index: 6;
@@ -860,8 +860,8 @@ button:disabled {
 .variant-card::before {
   content: "";
   display: block;
-  height: 9.5rem;
-  margin: -1.1rem -1.1rem 0.95rem;
+  height: 11.1rem;
+  margin: -1.2rem -1.2rem 1.05rem;
   background:
     radial-gradient(circle at 32% 58%, rgba(255, 214, 82, 0.72) 0 16%, transparent 17%),
     radial-gradient(circle at 58% 45%, rgba(240, 92, 84, 0.34) 0 11%, transparent 12%),
