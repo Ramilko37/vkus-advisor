@@ -184,6 +184,12 @@ export function useBasketPlanner() {
     dispatch({ type: "catalog", mode: catalog.mode });
   }, []);
 
+  const mockResults = useCallback(() => {
+    abortRef.current?.abort();
+    dispatch({ type: "catalog", mode: "live" });
+    dispatch({ type: "ready", intent: mockIntent, variants: mockVariants, models: ["debug/mock"] });
+  }, []);
+
   const createCart = useCallback(async () => {
     const variant = selectedVariant(state);
     const catalog = catalogRef.current;
@@ -205,6 +211,7 @@ export function useBasketPlanner() {
     submit,
     retry,
     reconnectCatalog,
+    mockResults,
     createCart,
     selectVariant: (id: string) => dispatch({ type: "select", id }),
     updateItems: (id: string, items: BasketItem[]) => dispatch({ type: "items", id, items }),
@@ -225,4 +232,66 @@ function toAppError(error: unknown): AppError {
     return { source: "openrouter", code: error.code, message: error.message, recoverable: true };
   }
   return { source: "application", code: "unknown", message: error instanceof Error ? error.message : "Что-то пошло не так.", recoverable: true };
+}
+
+const mockIntent: BasketIntent = {
+  originalRequest: "Ужины на 3 дня для двоих до 3000 ₽, без грибов",
+  people: 2,
+  days: 3,
+  meals: ["ужин"],
+  budgetRub: 3000,
+  maxCookingMinutes: 35,
+  excludedIngredients: ["грибы"],
+  preferences: ["простые блюда", "понятный состав"],
+  readyFoodAllowed: true,
+  priority: "balanced",
+  needsClarification: false,
+  clarificationQuestion: null,
+  assumptions: ["Демо-подборка для отладки интерфейса"],
+  searchQueries: [
+    { query: "курица гарнир овощи", purpose: "ужин", sort: "popularity" },
+    { query: "готовые блюда ужин", purpose: "быстрый вариант", sort: "rating" },
+  ],
+};
+
+const mockItems: BasketItem[] = [
+  mockItem("debug-101", "Салат \"Витаминный\" с лимонной заправкой", 149, 4, "Овощи", "Добавляет свежесть"),
+  mockItem("debug-102", "Яйца отварные, 2 шт", 129, 4, "Белок", "Быстро закрывает белок"),
+  mockItem("debug-103", "Тунец (скипджек) филе натуральный, 140 г", 219, 4, "Белок", "Не требует готовки"),
+  mockItem("debug-104", "Снеки хрустящие из свеклы, тыквы и моркови", 96, 4, "Перекус", "Удобно добавить к ужину"),
+];
+
+const mockVariants: BasketVariant[] = [
+  mockVariant("debug-balanced", "balanced", "Сбалансированная", "4 товаров на 2 388 ₽: компромисс цены и удобства.", mockItems, ["Оптимальный баланс бюджета и готовки"]),
+  mockVariant("debug-budget", "budget", "Экономная", "4 товаров на 1 852 ₽ с акцентом на экономию.", mockItems.map((item) => ({ ...item, priceRub: Math.max(78, item.priceRub - 42) })), ["Минимум стоимости"]),
+  mockVariant("debug-speed", "speed", "Самая простая", "4 товаров на 3 568 ₽ с минимумом приготовления.", mockItems.map((item) => ({ ...item, priceRub: item.priceRub + 76 })), ["Меньше готовки"]),
+];
+
+function mockItem(xmlId: string, name: string, priceRub: number, quantity: number, role: string, reason: string): BasketItem {
+  return {
+    id: xmlId,
+    xmlId,
+    name,
+    priceRub,
+    quantity,
+    role,
+    reason,
+    sourceQuery: "debug",
+    isDemo: true,
+  };
+}
+
+function mockVariant(id: string, strategy: BasketVariant["strategy"], title: string, summary: string, items: BasketItem[], tradeoffs: string[]): BasketVariant {
+  const totalRub = Math.round(items.reduce((sum, item) => sum + item.priceRub * item.quantity, 0));
+  return {
+    id,
+    strategy,
+    title,
+    summary,
+    tradeoffs,
+    items,
+    totalRub,
+    uniqueItemsCount: items.length,
+    warnings: [],
+  };
 }

@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, ExternalLink, Loader2, Minus, Plus, RefreshCw, Send, ShoppingBasket, Trash2, UserRound } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, ExternalLink, Loader2, Minus, Plus, RefreshCw, Send, ShoppingBasket, Trash2, UserRound } from "lucide-react";
 import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactNode, useMemo, useRef, useState } from "react";
 import type { BasketItem, BasketVariant, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
@@ -69,6 +69,7 @@ export function ConversationPanel({ planner }: { planner: Planner }) {
       <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={["analyzing", "searching", "composing", "creatingCart"].includes(planner.state.stage)} />
       <CatalogStatus mode={planner.state.catalogMode} onReconnect={planner.reconnectCatalog} />
       <PromptExamples onPick={setText} />
+      {import.meta.env.DEV && <button className="debug-results-button" type="button" onClick={planner.mockResults}>Debug: результаты</button>}
       <p className="result-note">Подберём реальные товары и предложим три варианта: сбалансированный, экономный и быстрый.</p>
     </section>
   );
@@ -251,6 +252,23 @@ export function BasketResults({ planner }: { planner: Planner }) {
     "--deck-drag-side": `${dragOffset * 0.22}px`,
     "--deck-drag-rotate": `${dragOffset * -0.045}deg`,
   } as CSSProperties;
+  if (selected) {
+    return (
+      <section className="results-panel basket-step" aria-label="Состав выбранной корзины" data-od-id="results-panel">
+        <button className="link-button step-back" type="button" onClick={() => setOpenedId(null)}>
+          <ChevronLeft size={17} /> К вариантам
+        </button>
+        <SelectedBasketActions
+          variant={selected}
+          mode={planner.state.catalogMode}
+          creating={planner.state.stage === "creatingCart"}
+          onItems={(items) => planner.updateItems(selected.id, items)}
+          onCreateCart={planner.createCart}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="results-panel" aria-label="Варианты корзины" data-od-id="results-panel">
       {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
@@ -291,18 +309,6 @@ export function BasketResults({ planner }: { planner: Planner }) {
       <div className="deck-dots" aria-hidden="true">
         {planner.state.variants.map((variant) => <span key={variant.id} className={variant.id === activeId ? "active" : ""} />)}
       </div>
-      {selected && (
-        <SelectedBasketActions
-          variant={selected}
-          mode={planner.state.catalogMode}
-          creating={planner.state.stage === "creatingCart"}
-          onItems={(items) => planner.updateItems(selected.id, items)}
-          onCreateCart={planner.createCart}
-        />
-      )}
-      <p className="disclaimer">Цены, наличие и актуальный состав проверяйте на карточках товаров перед оформлением заказа.</p>
-      {planner.state.intent?.excludedIngredients.length ? <p className="disclaimer warning">Прототип не подтверждает отсутствие аллергенов. Обязательно проверяйте полный состав товара самостоятельно.</p> : null}
-      <TechnicalDetails mode={planner.state.catalogMode} models={planner.state.modelNames} />
     </section>
   );
 }
@@ -335,15 +341,22 @@ export function BasketResultsSkeleton({ stage }: { stage: WorkflowStage }) {
 }
 
 export function BasketVariantCard({ variant, active, selected, position, onFocus, onSelect }: { variant: BasketVariant; active: boolean; selected: boolean; position: number; onFocus: () => void; onSelect: () => void }) {
-  const [open, setOpen] = useState(false);
-  const visibleItems = open ? variant.items : variant.items.slice(0, 5);
+  const visibleItems = variant.items.slice(0, 2);
   const normalizedPosition = Math.max(-1, Math.min(1, position));
+  const handleCardClick = (event: MouseEvent<HTMLElement>) => {
+    if ((event.target as HTMLElement).closest("button, a, input, textarea")) return;
+    if (active) {
+      onSelect();
+      return;
+    }
+    onFocus();
+  };
   return (
     <article
       className={`variant-card ${active ? "active" : ""} ${selected ? "selected" : ""}`}
       data-position={normalizedPosition}
       data-od-id={`variant-card-${variant.id}`}
-      onClick={active ? undefined : onFocus}
+      onClick={handleCardClick}
     >
       <div className="variant-heading">
         <div>
@@ -358,10 +371,7 @@ export function BasketVariantCard({ variant, active, selected, position, onFocus
       <ul className="item-preview">
         {visibleItems.map((item) => <li key={item.xmlId}><span>{item.name}</span><b>{item.quantity} шт.</b></li>)}
       </ul>
-      {variant.items.length > 5 && <button className="link-button" type="button" onClick={() => setOpen(!open)}><ChevronDown size={16} /> {open ? "Свернуть" : "Показать все"}</button>}
-      <ul className="tradeoffs">{variant.tradeoffs.map((item) => <li key={item}>{item}</li>)}</ul>
       {variant.warnings.map((warning) => <p className="warning-line" key={warning}><AlertTriangle size={15} /> {warning}</p>)}
-      <button type="button" className={selected ? "secondary-button full" : active ? "primary-button full" : "secondary-button full"} onClick={active ? onSelect : onFocus}>{selected ? "Открыто" : active ? "Открыть" : "Посмотреть"}</button>
     </article>
   );
 }
