@@ -1,0 +1,14 @@
+node_modules
+dist
+.playwright-cli
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+*.timestamp-*.mjs
+*.js
+*.d.ts
+!src/**/*.d.ts
+!*.config.js
+!server.mjs
+.vercel
