@@ -65,11 +65,11 @@ const mockBasket = {
 const rows = [];
 for (const [index, message] of queries.entries()) {
   const totalStart = performance.now();
-  const intent = live ? await timed(() => openRouter("intent", intentPrompt, { previousIntent: null, selectedBasketSummary: null, newUserMessage: message }, basketIntentJsonSchema)) : fake(mockIntent);
+  const intent = live ? await timed(() => llm("intent", intentPrompt, { previousIntent: null, selectedBasketSummary: null, newUserMessage: message }, basketIntentJsonSchema)) : fake(mockIntent);
   const searches = live ? await timed(() => searchCatalog(intent.result.data.searchQueries)) : fake(mockProducts);
   const searchProducts = live ? searches.result : searches.result.data;
   const candidateProducts = searchProducts.slice(0, 16);
-  const basket = live ? await timed(() => openRouter("basket", basketPrompt, { intent: intent.result.data, candidateProducts }, basketDraftJsonSchema)) : fake(mockBasket);
+  const basket = live ? await timed(() => llm("basket", basketPrompt, { intent: intent.result.data, candidateProducts }, basketDraftJsonSchema)) : fake(mockBasket);
   const measuredTotalMs = Math.round(performance.now() - totalStart);
   rows.push({
     request: index + 1,
@@ -89,13 +89,13 @@ for (const [index, message] of queries.entries()) {
 
 printSummary(rows);
 
-async function openRouter(stage, systemPrompt, userPayload, jsonSchema) {
-  const response = await fetch(`${apiBase}/api/openrouter`, {
+async function llm(stage, systemPrompt, userPayload, jsonSchema) {
+  const response = await fetch(`${apiBase}/api/llm`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ stage, systemPrompt, userPayload, jsonSchema, sessionId: `benchmark-${stage}` }),
   });
-  if (!response.ok) throw new Error(`OpenRouter ${response.status}`);
+  if (!response.ok) throw new Error(`LLM ${response.status}`);
   return response.json();
 }
 

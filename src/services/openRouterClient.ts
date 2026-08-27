@@ -11,13 +11,13 @@ export function getSessionId() {
   return next;
 }
 
-export class OpenRouterError extends Error {
+export class LlmProviderError extends Error {
   constructor(readonly code: "unauthorized" | "rate_limit" | "timeout" | "invalid" | "network", message: string) {
     super(message);
   }
 }
 
-export class BrowserOpenRouterClient {
+export class BrowserLlmClient {
   async generateStructured<T>(options: {
     systemPrompt: string;
     userPayload: unknown;
@@ -34,7 +34,7 @@ export class BrowserOpenRouterClient {
     options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
 
     try {
-      const response = await fetch("/api/openrouter", {
+      const response = await fetch("/api/llm", {
         method: "POST",
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
@@ -48,15 +48,15 @@ export class BrowserOpenRouterClient {
         }),
       });
 
-      if (response.status === 401) throw new OpenRouterError("unauthorized", "OPENROUTER_API_KEY не настроен на сервере.");
-      if (response.status === 429) throw new OpenRouterError("rate_limit", "Бесплатная модель не приняла запрос из-за ограничения частоты. Текущие данные сохранены.");
-      if (response.status >= 500) throw new OpenRouterError("network", "OpenRouter временно недоступен.");
-      if (!response.ok) throw new OpenRouterError("network", "OpenRouter вернул ошибку запроса.");
+      if (response.status === 401) throw new LlmProviderError("unauthorized", "NEURALDEEP_API_KEY не настроен на сервере.");
+      if (response.status === 429) throw new LlmProviderError("rate_limit", "Модель не приняла запрос из-за ограничения частоты. Текущие данные сохранены.");
+      if (response.status >= 500) throw new LlmProviderError("network", "LLM-провайдер временно недоступен.");
+      if (!response.ok) throw new LlmProviderError("network", "LLM-провайдер вернул ошибку запроса.");
 
       const payload = await response.json() as StructuredGenerationResult<unknown>;
       const validated = options.validator.safeParse(payload.data);
       if (!validated.success) {
-        throw new OpenRouterError("invalid", "Модель вернула неподходящий формат. Повторите сборку корзины.");
+        throw new LlmProviderError("invalid", "Модель вернула неподходящий формат. Повторите сборку корзины.");
       }
       return {
         data: validated.data as T,
@@ -69,11 +69,14 @@ export class BrowserOpenRouterClient {
         repairRequired: payload.repairRequired,
       };
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") throw new OpenRouterError("timeout", "Модель не успела сформировать ответ. Можно повторить запрос.");
-      if (error instanceof OpenRouterError) throw error;
-      throw new OpenRouterError("network", "Не удалось выполнить запрос к OpenRouter.");
+      if (error instanceof DOMException && error.name === "AbortError") throw new LlmProviderError("timeout", "Модель не успела сформировать ответ. Можно повторить запрос.");
+      if (error instanceof LlmProviderError) throw error;
+      throw new LlmProviderError("network", "Не удалось выполнить запрос к LLM-провайдеру.");
     } finally {
       window.clearTimeout(timeout);
     }
   }
 }
+
+export const OpenRouterError = LlmProviderError;
+export const BrowserOpenRouterClient = BrowserLlmClient;

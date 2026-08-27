@@ -12,11 +12,18 @@ loadDotEnv();
 
 const distDir = resolve(__dirname, "dist");
 const port = Number(process.env.PORT || 5174);
+const llmProvider = normalizeLlmProvider(process.env.LLM_PROVIDER);
+const neuralDeepBaseUrl = (process.env.NEURALDEEP_API_BASE_URL || "https://api.neuraldeep.ru/v1").replace(/\/$/, "");
+const neuralDeepUrl = process.env.NEURALDEEP_API_URL || `${neuralDeepBaseUrl}/chat/completions`;
+const defaultNeuralDeepModel = "gpt-oss-120b";
 const openRouterUrl = process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1/chat/completions";
 const defaultStructuredModel = "nvidia/nemotron-3-super-120b-a12b:free";
 const legacyModel = process.env.OPENROUTER_MODEL;
-const intentModel = process.env.OPENROUTER_INTENT_MODEL || legacyModel || defaultStructuredModel;
-const basketModel = process.env.OPENROUTER_BASKET_MODEL || legacyModel || defaultStructuredModel;
+const neuralDeepLegacyModel = process.env.NEURALDEEP_MODEL;
+const neuralDeepIntentModel = process.env.NEURALDEEP_INTENT_MODEL || neuralDeepLegacyModel || defaultNeuralDeepModel;
+const neuralDeepBasketModel = process.env.NEURALDEEP_BASKET_MODEL || neuralDeepLegacyModel || defaultNeuralDeepModel;
+const openRouterIntentModel = process.env.OPENROUTER_INTENT_MODEL || legacyModel || defaultStructuredModel;
+const openRouterBasketModel = process.env.OPENROUTER_BASKET_MODEL || legacyModel || defaultStructuredModel;
 const intentFallbackModel = process.env.OPENROUTER_INTENT_FALLBACK_MODEL || process.env.OPENROUTER_FALLBACK_MODEL || "dots-studio/dots-3-note-preview:free";
 const basketFallbackModel = process.env.OPENROUTER_BASKET_FALLBACK_MODEL || process.env.OPENROUTER_FALLBACK_MODEL || "dots-studio/dots-3-note-preview:free";
 const openRouterReferer = process.env.OPENROUTER_HTTP_REFERER || `http://127.0.0.1:${port}`;
@@ -41,14 +48,20 @@ export async function handleRequest(req, res) {
     if (!req.url) return send(res, 404, { error: "Not found" });
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname === "/api/health") return send(res, 200, {
+      llmProvider,
+      llmConfigured: isActiveLlmConfigured(),
+      llmApiUrl: llmProvider === "openrouter" ? openRouterUrl : neuralDeepUrl,
+      neuralDeepConfigured: Boolean(process.env.NEURALDEEP_API_KEY),
+      neuralDeepApiUrl: neuralDeepUrl,
       openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY),
       openRouterApiUrl: openRouterUrl,
-      intentModel: effectiveModel(intentModel),
-      basketModel: effectiveModel(basketModel),
+      intentModel: effectiveModel(activeModel("intent")),
+      basketModel: effectiveModel(activeModel("basket")),
       openRouterReferer,
       openRouterTitle,
       catalogMode,
     });
+    if (url.pathname === "/api/llm" && req.method === "POST") return await handleLlm(req, res);
     if (url.pathname === "/api/openrouter" && req.method === "POST") return await handleOpenRouter(req, res);
     if (url.pathname === "/api/catalog/status") return await handleCatalogStatus(res);
     if (url.pathname === "/api/catalog/search" && req.method === "POST") return await handleCatalogSearch(req, res);
@@ -67,6 +80,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 }
 
 async function handleOpenRouter(req, res) {
+  if (llmProvider !== "openrouter") return send(res, 410, { error: "OpenRouter provider is not active. Set LLM_PROVIDER=openrouter to enable legacy endpoint." });
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return send(res, 401, { error: "OPENROUTER_API_KEY is missing" });
   const body = await readJson(req);
@@ -74,8 +88,63 @@ async function handleOpenRouter(req, res) {
   return send(res, 200, result);
 }
 
+async function handleLlm(req, res) {
+  const body = await readJson(req);
+  if (llmProvider === "openrouter") {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return send(res, 401, { error: "OPENROUTER_API_KEY is missing" });
+    return send(res, 200, await openRouterRequest(apiKey, body));
+  }
+
+  const apiKey = process.env.NEURALDEEP_API_KEY;
+  if (!apiKey) return send(res, 401, { error: "NEURALDEEP_API_KEY is missing" });
+  return send(res, 200, await neuralDeepStructuredRequest(apiKey, body));
+}
+
+export async function neuralDeepStructuredRequest(apiKey, body, options = {}) {
+  const baseConfig = generationConfig(body.stage, "neuraldeep");
+  const config = {
+    ...baseConfig,
+    model: options.model ?? baseConfig.model,
+    fallbackModel: options.fallbackModel === undefined ? baseConfig.fallbackModel : options.fallbackModel,
+    temperature: options.temperature ?? baseConfig.temperature,
+    maxTokens: options.maxTokens ?? body.maxTokens ?? baseConfig.maxTokens,
+  };
+  const models = [config.model, config.fallbackModel || config.model]
+    .filter((model, index, all) => model && all.indexOf(model) === index)
+    .slice(0, 2);
+  const formats = options.formats || ["json_schema", "json_object"];
+  let lastError = null;
+  let attempt = 0;
+  for (const model of models) {
+    for (const format of formats) {
+      try {
+        const result = await neuralDeepFetch(apiKey, body, format, model, config, attempt);
+        return {
+          ...result,
+          retryCount: attempt,
+          fallbackModelUsed: model !== config.model,
+        };
+      } catch (error) {
+        lastError = error;
+        if (!options.silent) console.warn("neuraldeep_attempt_failed", {
+          stage: config.stage,
+          model,
+          format,
+          status: error?.status,
+          neuralDeepStatus: error?.neuralDeepStatus,
+          message: String(error?.message || error).slice(0, 240),
+        });
+        attempt += 1;
+        if (!isRetryableLlmError(error)) throw error;
+      }
+    }
+  }
+  throw lastError;
+}
+
 export async function openRouterStructuredRequest(apiKey, body, options = {}) {
-  const baseConfig = generationConfig(body.stage);
+  const baseConfig = generationConfig(body.stage, "openrouter");
   const config = {
     ...baseConfig,
     model: options.model ?? baseConfig.model,
@@ -168,12 +237,85 @@ async function openRouterFetch(apiKey, body, format, model, config, retryIndex) 
     throw error;
   }
   const parsed = extractJsonFromText(content);
-  if (!parsed.ok) {
+  if (!parsed?.ok) {
     const error = new Error("Invalid OpenRouter JSON");
     error.status = finishReason === "length" ? 504 : 502;
     error.content = content;
     error.finishReason = finishReason;
     error.openRouterStatus = error.status;
+    throw error;
+  }
+  return {
+    data: parsed.value,
+    model: payload.model || model,
+    finishReason,
+    durationMs: Math.round(performance.now() - startedAt),
+    usage: payload.usage ? {
+      promptTokens: payload.usage.prompt_tokens,
+      completionTokens: payload.usage.completion_tokens,
+      totalTokens: payload.usage.total_tokens,
+      reasoningTokens: payload.usage.completion_tokens_details?.reasoning_tokens,
+      cachedTokens: payload.usage.prompt_tokens_details?.cached_tokens,
+    } : undefined,
+    responseFormat: format,
+    repairRequired: parsed.repairRequired,
+  };
+}
+
+async function neuralDeepFetch(apiKey, body, format, model, config, retryIndex) {
+  const startedAt = performance.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  let response;
+  try {
+    response = await fetch(neuralDeepUrl, {
+      method: "POST",
+      signal: controller.signal,
+      headers: neuralDeepHeaders(apiKey),
+      body: JSON.stringify(neuralDeepBody(body, format, model, config, retryIndex)),
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error("NeuralDeep request timeout");
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    const status = response.status === 429 ? 429 : response.status === 401 ? 401 : 502;
+    const error = new Error(text || `NeuralDeep ${response.status}`);
+    error.status = status;
+    error.neuralDeepStatus = response.status;
+    throw error;
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    const error = new Error("Invalid NeuralDeep response JSON");
+    error.status = 502;
+    error.neuralDeepStatus = 502;
+    throw error;
+  }
+  const content = payload.choices?.[0]?.message?.content || "";
+  const finishReason = payload.choices?.[0]?.finish_reason;
+  if (finishReason === "content_filter") {
+    const error = new Error("NeuralDeep content filter");
+    error.status = 422;
+    throw error;
+  }
+  const parsed = extractJsonFromText(content);
+  if (!parsed?.ok) {
+    const error = new Error("Invalid NeuralDeep JSON");
+    error.status = finishReason === "length" ? 504 : 502;
+    error.content = content;
+    error.finishReason = finishReason;
+    error.neuralDeepStatus = error.status;
     throw error;
   }
   return {
@@ -202,6 +344,13 @@ function openRouterHeaders(apiKey) {
   };
 }
 
+function neuralDeepHeaders(apiKey) {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+  };
+}
+
 function openRouterBody(body, format, model, config, retryIndex) {
   return {
     model,
@@ -223,9 +372,34 @@ function openRouterBody(body, format, model, config, retryIndex) {
   };
 }
 
+function neuralDeepBody(body, format, model, config, retryIndex) {
+  const requestBody = {
+    model,
+    messages: [
+      { role: "system", content: String(body.systemPrompt || "") },
+      { role: "user", content: openRouterUserContent(body) },
+    ],
+    temperature: config.temperature,
+    max_tokens: retryIndex ? Math.min(Math.ceil(config.maxTokens * 1.25), config.stage === "basket" ? 2400 : 900) : config.maxTokens,
+    stream: false,
+    response_format: format === "json_schema"
+      ? { type: "json_schema", json_schema: { name: "response", strict: true, schema: body.jsonSchema } }
+      : { type: "json_object" },
+    user: body.sessionId,
+  };
+  if (model.startsWith("qwen3.")) requestBody.chat_template_kwargs = { enable_thinking: false };
+  return requestBody;
+}
+
 function openRouterUserContent(body) {
   const payload = JSON.stringify(body.userPayload ?? {});
   return body.jsonSchema ? `${payload}\n\nJSON Schema:\n${JSON.stringify(body.jsonSchema)}` : payload;
+}
+
+function isRetryableLlmError(error) {
+  const text = String(error?.message || error);
+  return error?.neuralDeepStatus >= 500
+    || /upstream|temporarily|timeout|unavailable|Invalid NeuralDeep JSON|response_format|json_schema|grammar|guided/i.test(text);
 }
 
 function isRetryableOpenRouterError(error) {
@@ -234,17 +408,33 @@ function isRetryableOpenRouterError(error) {
     || /Provider returned error|unavailable|real-time inference|temporarily unavailable|Invalid OpenRouter JSON|reasoning|response_format|json_schema|unsupported|parameters/i.test(text);
 }
 
-function generationConfig(stage) {
+function generationConfig(stage, provider = llmProvider) {
   const isBasket = stage === "basket";
   return {
     stage: isBasket ? "basket" : "intent",
-    model: isBasket ? basketModel : intentModel,
-    fallbackModel: isBasket ? basketFallbackModel : intentFallbackModel,
+    model: provider === "openrouter" ? (isBasket ? openRouterBasketModel : openRouterIntentModel) : (isBasket ? neuralDeepBasketModel : neuralDeepIntentModel),
+    fallbackModel: provider === "openrouter" ? (isBasket ? basketFallbackModel : intentFallbackModel) : undefined,
     temperature: isBasket ? 0.1 : 0,
-    maxTokens: Number(isBasket ? process.env.OPENROUTER_BASKET_MAX_TOKENS || 1800 : process.env.OPENROUTER_INTENT_MAX_TOKENS || 600),
-    timeoutMs: Number(isBasket ? process.env.OPENROUTER_BASKET_TIMEOUT_MS || 75_000 : process.env.OPENROUTER_INTENT_TIMEOUT_MS || 45_000),
+    maxTokens: Number(isBasket
+      ? process.env.NEURALDEEP_BASKET_MAX_TOKENS || process.env.OPENROUTER_BASKET_MAX_TOKENS || 1800
+      : process.env.NEURALDEEP_INTENT_MAX_TOKENS || process.env.OPENROUTER_INTENT_MAX_TOKENS || 600),
+    timeoutMs: Number(isBasket
+      ? process.env.NEURALDEEP_BASKET_TIMEOUT_MS || process.env.OPENROUTER_BASKET_TIMEOUT_MS || 75_000
+      : process.env.NEURALDEEP_INTENT_TIMEOUT_MS || process.env.OPENROUTER_INTENT_TIMEOUT_MS || 45_000),
     providerSort: isBasket ? "throughput" : "latency",
   };
+}
+
+function activeModel(stage) {
+  return generationConfig(stage).model;
+}
+
+function isActiveLlmConfigured() {
+  return llmProvider === "openrouter" ? Boolean(process.env.OPENROUTER_API_KEY) : Boolean(process.env.NEURALDEEP_API_KEY);
+}
+
+function normalizeLlmProvider(provider) {
+  return String(provider || "neuraldeep").toLocaleLowerCase("en-US") === "openrouter" ? "openrouter" : "neuraldeep";
 }
 
 function effectiveModel(model) {
@@ -434,14 +624,14 @@ function extractJsonFromText(text) {
 function parseMcpResponse(value) {
   if (typeof value === "string") {
     const parsed = extractJsonFromText(value);
-    return parsed.ok ? parsed.value : value;
+    return parsed?.ok ? parsed.value : value;
   }
   const content = value?.content;
   if (Array.isArray(content)) {
     for (const part of content) {
       if (typeof part.text === "string") {
         const parsed = extractJsonFromText(part.text);
-        return parsed.ok ? parsed.value : part.text;
+        return parsed?.ok ? parsed.value : part.text;
       }
     }
   }

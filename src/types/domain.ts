@@ -96,7 +96,7 @@ export interface ChatMessage {
 }
 
 export interface AppError {
-  source: "openrouter" | "mcp" | "validation" | "application";
+  source: "llm" | "openrouter" | "mcp" | "validation" | "application";
   code: string;
   message: string;
   recoverable: boolean;

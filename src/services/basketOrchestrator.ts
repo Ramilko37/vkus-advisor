@@ -9,7 +9,7 @@ import { measureStage } from "./pipelineMetrics";
 import { retrieveCandidateProducts } from "./retrieveCandidateProducts";
 import type { z } from "zod";
 
-interface OpenRouterClientLike {
+interface LlmClientLike {
   generateStructured<T>(options: {
     systemPrompt: string;
     userPayload: unknown;
@@ -44,11 +44,11 @@ export async function analyzeIntent(
   message: string,
   previousIntent: BasketIntent | null,
   selectedBasketSummary: unknown,
-  openRouter: OpenRouterClientLike,
+  llm: LlmClientLike,
   sessionId: string,
   signal?: AbortSignal,
 ) {
-  const result = await openRouter.generateStructured<BasketIntent>({
+  const result = await llm.generateStructured<BasketIntent>({
     systemPrompt: intentPrompt,
     userPayload: { previousIntent: compactPreviousIntent(previousIntent), selectedBasketSummary, newUserMessage: message.slice(0, 2000) },
     jsonSchema: basketIntentJsonSchema,
@@ -63,7 +63,7 @@ export async function analyzeIntent(
 export async function composeBaskets(
   intent: BasketIntent,
   catalog: CatalogClient,
-  openRouter: OpenRouterClientLike,
+  llm: LlmClientLike,
   sessionId: string,
   signal?: AbortSignal,
   reusedCandidates?: NormalizedProduct[],
@@ -83,7 +83,7 @@ export async function composeBaskets(
   }
   const llmCandidates = candidates.map((product) => toLlmCandidate(product, intent));
 
-  const basketResult = await openRouter.generateStructured<{ variants: BasketVariantDraft[] }>({
+  const basketResult = await llm.generateStructured<{ variants: BasketVariantDraft[] }>({
     systemPrompt: basketPrompt,
     userPayload: {
       intent,

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useReducer, useRef } from "react";
 import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, NormalizedProduct, PipelineMetrics, WorkflowStage } from "../types/domain";
 import { analyzeIntent, basketSummary, composeBaskets } from "../services/basketOrchestrator";
-import { BrowserOpenRouterClient, OpenRouterError, getSessionId } from "../services/openRouterClient";
+import { BrowserLlmClient, LlmProviderError, getSessionId } from "../services/openRouterClient";
 import { createCatalogClient } from "../services/catalog";
 import { applyFastIntentPatch, buildCatalogFingerprint, normalizeBasketIntent } from "../services/intentUtils";
 import { measureStage } from "../services/pipelineMetrics";
@@ -78,7 +78,7 @@ export function useBasketPlanner() {
   const candidatePoolRef = useRef<CandidatePool | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const openRouter = useMemo(() => new BrowserOpenRouterClient(), []);
+  const llm = useMemo(() => new BrowserLlmClient(), []);
   const sessionId = useMemo(() => getSessionId(), []);
 
   const runWorkflow = useCallback(async (message: string) => {
@@ -116,7 +116,7 @@ export function useBasketPlanner() {
       const fastIntent = state.intent ? applyFastIntentPatch(message, state.intent) : null;
       const intentResult = fastIntent
         ? { data: normalizeBasketIntent(fastIntent), model: "", retryCount: 0, fallbackModelUsed: false, usage: undefined }
-        : (await measureStage(() => analyzeIntent(message, state.intent, basketSummary(selectedVariant(state)), openRouter, sessionId, controller.signal))).result;
+        : (await measureStage(() => analyzeIntent(message, state.intent, basketSummary(selectedVariant(state)), llm, sessionId, controller.signal))).result;
       metrics.intentMs = fastIntent ? 0 : intentResult.durationMs || 0;
       metrics.intentModel = intentResult.model || undefined;
       metrics.intentPromptTokens = intentResult.usage?.promptTokens;
@@ -137,7 +137,7 @@ export function useBasketPlanner() {
       dispatch({ type: "stage", stage: "composing" });
       const fingerprint = buildCatalogFingerprint(intentResult.data);
       const reusablePool = candidatePoolRef.current?.intentFingerprint === fingerprint ? candidatePoolRef.current.products : undefined;
-      const measuredBasket = await measureStage(() => composeBaskets(intentResult.data, catalog, openRouter, sessionId, controller.signal, reusablePool));
+      const measuredBasket = await measureStage(() => composeBaskets(intentResult.data, catalog, llm, sessionId, controller.signal, reusablePool));
       const result = measuredBasket.result;
       metrics.basketMs = measuredBasket.durationMs - result.catalogSearchMs;
       metrics.catalogSearchMs = result.catalogSearchMs;
@@ -164,7 +164,7 @@ export function useBasketPlanner() {
       const appError = toAppError(error);
       dispatch({ type: "error", error: appError, pendingMessage: message });
     }
-  }, [openRouter, sessionId, state]);
+  }, [llm, sessionId, state]);
 
   const submit = useCallback(async (message: string) => {
     const trimmed = message.trim();
@@ -228,8 +228,8 @@ function recalculate(variant: BasketVariant): BasketVariant {
 }
 
 function toAppError(error: unknown): AppError {
-  if (error instanceof OpenRouterError) {
-    return { source: "openrouter", code: error.code, message: error.message, recoverable: true };
+  if (error instanceof LlmProviderError) {
+    return { source: "llm", code: error.code, message: error.message, recoverable: true };
   }
   return { source: "application", code: "unknown", message: error instanceof Error ? error.message : "Что-то пошло не так.", recoverable: true };
 }

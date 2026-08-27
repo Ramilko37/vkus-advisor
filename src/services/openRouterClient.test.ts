@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { BrowserOpenRouterClient } from "./openRouterClient";
+import { BrowserLlmClient } from "./openRouterClient";
 
-describe("BrowserOpenRouterClient", () => {
+describe("BrowserLlmClient", () => {
   it("sends structured generation through local API without browser secrets", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -11,7 +11,7 @@ describe("BrowserOpenRouterClient", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = new BrowserOpenRouterClient();
+    const client = new BrowserLlmClient();
     const result = await client.generateStructured({
       systemPrompt: "system",
       userPayload: { message: "hello" },
@@ -22,7 +22,7 @@ describe("BrowserOpenRouterClient", () => {
     });
 
     expect(result.model).toBe("server-model");
-    expect(fetchMock).toHaveBeenCalledWith("/api/openrouter", expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith("/api/llm", expect.objectContaining({
       method: "POST",
       headers: { "Content-Type": "application/json" },
     }));
