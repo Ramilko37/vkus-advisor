@@ -15,7 +15,7 @@ const port = Number(process.env.PORT || 5174);
 const llmProvider = normalizeLlmProvider(process.env.LLM_PROVIDER);
 const neuralDeepBaseUrl = (process.env.NEURALDEEP_API_BASE_URL || "https://api.neuraldeep.ru/v1").replace(/\/$/, "");
 const neuralDeepUrl = process.env.NEURALDEEP_API_URL || `${neuralDeepBaseUrl}/chat/completions`;
-const defaultNeuralDeepModel = "gpt-oss-120b";
+const defaultNeuralDeepModel = "qwen3.6-fp8-noreason";
 const openRouterUrl = process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1/chat/completions";
 const defaultStructuredModel = "nvidia/nemotron-3-super-120b-a12b:free";
 const legacyModel = process.env.OPENROUTER_MODEL;
@@ -229,8 +229,15 @@ async function openRouterFetch(apiKey, body, format, model, config, retryIndex) 
     error.openRouterStatus = 502;
     throw error;
   }
-  const content = payload.choices?.[0]?.message?.content || "";
-  const finishReason = payload.choices?.[0]?.finish_reason;
+  const choice = payload?.choices?.[0];
+  if (!choice) {
+    const error = new Error("Invalid OpenRouter response shape");
+    error.status = 502;
+    error.openRouterStatus = 502;
+    throw error;
+  }
+  const content = choice.message?.content || "";
+  const finishReason = choice.finish_reason;
   if (finishReason === "content_filter") {
     const error = new Error("OpenRouter content filter");
     error.status = 422;
@@ -302,8 +309,15 @@ async function neuralDeepFetch(apiKey, body, format, model, config, retryIndex) 
     error.neuralDeepStatus = 502;
     throw error;
   }
-  const content = payload.choices?.[0]?.message?.content || "";
-  const finishReason = payload.choices?.[0]?.finish_reason;
+  const choice = payload?.choices?.[0];
+  if (!choice) {
+    const error = new Error("Invalid NeuralDeep response shape");
+    error.status = 502;
+    error.neuralDeepStatus = 502;
+    throw error;
+  }
+  const content = choice.message?.content || "";
+  const finishReason = choice.finish_reason;
   if (finishReason === "content_filter") {
     const error = new Error("NeuralDeep content filter");
     error.status = 422;
@@ -661,7 +675,7 @@ function normalizeProduct(raw, sourceQuery, isDemo) {
     rating: numberValue(raw?.rating) || numberValue(raw?.rating?.average),
     reviewsCount: numberValue(raw?.reviewsCount ?? raw?.reviews_count) || numberValue(raw?.rating?.count),
     weightLabel: stringValue(raw?.weightLabel ?? raw?.weight ?? raw?.volume),
-    imageUrl: stringValue(raw?.image ?? raw?.imageUrl ?? raw?.picture),
+    imageUrl: imageValue(raw),
     productUrl: stringValue(raw?.url ?? raw?.productUrl ?? raw?.link),
     description: cleanText(stringValue(raw?.description)),
     composition: cleanText(stringValue(raw?.composition ?? raw?.ingredients)) || propertyValue(raw, "состав"),
@@ -675,14 +689,28 @@ function normalizeProduct(raw, sourceQuery, isDemo) {
 }
 
 function normalizeDetails(raw) {
-  return normalizeProduct(raw, "details", false) || {
-    description: stringValue(raw?.description),
-    composition: stringValue(raw?.composition ?? raw?.ingredients),
-    calories: numberValue(raw?.calories),
-    proteins: numberValue(raw?.proteins),
-    fats: numberValue(raw?.fats),
-    carbohydrates: numberValue(raw?.carbohydrates),
+  const value = raw?.data || raw;
+  return normalizeProduct(value, "details", false) || {
+    imageUrl: imageValue(value),
+    productUrl: stringValue(value?.url ?? value?.productUrl ?? value?.link),
+    description: cleanText(stringValue(value?.description)),
+    composition: cleanText(stringValue(value?.composition ?? value?.ingredients)) || propertyValue(value, "состав"),
+    calories: numberValue(value?.calories),
+    proteins: numberValue(value?.proteins),
+    fats: numberValue(value?.fats),
+    carbohydrates: numberValue(value?.carbohydrates),
   };
+}
+
+function imageValue(raw) {
+  const direct = stringValue(raw?.image ?? raw?.imageUrl ?? raw?.image_url ?? raw?.picture ?? raw?.photo ?? raw?.thumbnail);
+  if (direct) return direct;
+  if (!Array.isArray(raw?.images)) return undefined;
+  for (const item of raw.images) {
+    const url = stringValue(item?.medium ?? item?.small ?? item?.large ?? item?.url);
+    if (url) return url;
+  }
+  return undefined;
 }
 
 function extractCartUrl(raw) {

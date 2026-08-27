@@ -28,6 +28,19 @@ const propertyValue = (record: JsonRecord, name: string) => {
   return cleanText(asString(asRecord(found)?.value));
 };
 
+const imageValue = (record: JsonRecord): string | undefined => {
+  const direct = asString(record.image ?? record.imageUrl ?? record.image_url ?? record.picture ?? record.photo ?? record.thumbnail);
+  if (direct) return direct;
+  const images = record.images;
+  if (!Array.isArray(images)) return undefined;
+  for (const item of images) {
+    const image = asRecord(item);
+    const url = image && asString(image.medium ?? image.small ?? image.large ?? image.url);
+    if (url) return url;
+  }
+  return undefined;
+};
+
 export function extractJsonFromText(text: string): unknown | null {
   const direct = tryParse(text);
   if (direct !== null) return direct;
@@ -110,7 +123,7 @@ export function normalizeSearchProduct(raw: unknown, sourceQuery: string, isDemo
   const priceRub = asNumber(record.priceRub ?? record.current_price ?? record.price_rub) ?? asNested(record.price, "current") ?? asNumber(record.price);
   if (!xmlId || !name || !priceRub || priceRub <= 0) return null;
   const url = asString(record.url ?? record.productUrl ?? record.link);
-  const imageUrl = asString(record.image ?? record.imageUrl ?? record.picture);
+  const imageUrl = imageValue(record);
   return {
     id: asString(record.id) ?? xmlId,
     xmlId,
@@ -134,17 +147,21 @@ export function normalizeSearchProduct(raw: unknown, sourceQuery: string, isDemo
 }
 
 export function normalizeProductDetails(raw: unknown): Partial<NormalizedProduct> {
-  const product = normalizeSearchProduct(raw, "details", false);
-  if (product) return product;
   const record = asRecord(raw);
-  if (!record) return {};
+  const value = asRecord(record?.data) ?? raw;
+  const product = normalizeSearchProduct(value, "details", false);
+  if (product) return product;
+  const details = asRecord(value);
+  if (!details) return {};
   return {
-    description: asString(record.description),
-    composition: asString(record.composition ?? record.ingredients),
-    calories: asNumber(record.calories),
-    proteins: asNumber(record.proteins),
-    fats: asNumber(record.fats),
-    carbohydrates: asNumber(record.carbohydrates),
+    imageUrl: imageValue(details),
+    productUrl: asString(details.url ?? details.productUrl ?? details.link),
+    description: cleanText(asString(details.description)),
+    composition: cleanText(asString(details.composition ?? details.ingredients)) ?? propertyValue(details, "состав"),
+    calories: asNumber(details.calories),
+    proteins: asNumber(details.proteins),
+    fats: asNumber(details.fats),
+    carbohydrates: asNumber(details.carbohydrates),
   };
 }
 

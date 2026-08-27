@@ -46,9 +46,14 @@ const roleLabels: Record<string, string> = {
   other: "Продукт",
 };
 
+function scrollToTop() {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+}
+
 export function AppShell({ children, route }: { children: ReactNode; route: "home" | "results" }) {
   return (
-    <main className={`app-shell ${route}-route`}>
+    <main className={`app-shell kit-shell ${route}-route`} data-g2-mode="compact">
       <Header route={route} />
       <div className="workspace">
         {children}
@@ -61,10 +66,10 @@ export function Header({ route }: { route: "home" | "results" }) {
   if (route === "results") return null;
 
   return (
-    <header className="header" data-od-id="app-header">
-      <p className="brand-kicker">ВкусВилл Advisor</p>
-      <h1>Умная корзина</h1>
-      <p className="header-copy">Расскажите, что нужно купить — подберём три варианта.</p>
+    <header className="header vv-preview-header" data-od-id="app-header">
+      <p className="brand-kicker vv-kicker">ВкусВилл Advisor</p>
+      <h1 className="vv-title">Умная корзина</h1>
+      <p className="header-copy vv-copy">Расскажите, что нужно купить — подберём три варианта.</p>
     </header>
   );
 }
@@ -79,14 +84,13 @@ export function ConversationPanel({ planner }: { planner: Planner }) {
   };
 
   return (
-    <section className="conversation-panel" aria-label="Подбор корзины" data-od-id="conversation-panel">
+    <section className="conversation-panel kit-home" aria-label="Подбор корзины" data-od-id="conversation-panel">
       {showMessages && <MessageList messages={planner.state.messages} />}
       <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} />
       <IntentChips intent={planner.state.intent} />
       {planner.state.error && <ErrorNotice message={planner.state.error.message} onRetry={planner.retry} />}
       <CatalogStatus mode={planner.state.catalogMode} onReconnect={planner.reconnectCatalog} />
       <PromptExamples onPick={setText} />
-      {import.meta.env.DEV && <button className="debug-results-button" type="button" onClick={planner.mockResults}>Debug: результаты</button>}
     </section>
   );
 }
@@ -203,7 +207,7 @@ export function ChatComposer({ value, onChange, onSubmit, busy }: { value: strin
     }
   };
   return (
-    <form className="composer liquid-glass" onSubmit={handleSubmit}>
+    <form className="composer vv-chat-composer liquid-glass" onSubmit={handleSubmit}>
       <label htmlFor="basket-request">Что собрать?</label>
       <textarea id="basket-request" value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Например: ужины на 3 дня для двоих, до 3000 ₽, без грибов" rows={3} />
       <button type="submit" disabled={busy || !value.trim()} aria-label="Собрать корзину">
@@ -221,16 +225,16 @@ export function BasketResults({ planner }: { planner: Planner }) {
   const openVariant = (id: string) => {
     planner.selectVariant(id);
     setOpenedId(id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollToTop();
   };
 
   if (selected) {
     return (
-      <section className="results-panel basket-step" aria-label="Состав выбранной корзины" data-od-id="results-panel">
+      <section className="results-panel kit-results basket-step" aria-label="Состав выбранной корзины" data-od-id="results-panel">
         <div className="basket-step-header">
           <button className="link-button step-back liquid-glass" type="button" onClick={() => {
             setOpenedId(null);
-            window.scrollTo({ top: 0, behavior: "smooth" });
+            scrollToTop();
           }}>
             <ChevronLeft size={17} /> К вариантам
           </button>
@@ -247,7 +251,7 @@ export function BasketResults({ planner }: { planner: Planner }) {
   }
 
   return (
-    <section className="results-panel" aria-label="Варианты корзины" data-od-id="results-panel">
+    <section className="results-panel kit-results" aria-label="Варианты корзины" data-od-id="results-panel">
       <div className="section-heading compact-heading">
         <div>
           <p className="section-kicker">Подборка</p>
@@ -298,11 +302,12 @@ export function BasketResultsSkeleton({ stage }: { stage: WorkflowStage }) {
 export function BasketVariantCard({ variant, recommended, balancedTotal, onSelect }: { variant: BasketVariant; recommended: boolean; balancedTotal: number | null; onSelect: () => void }) {
   const visibleItems = variant.items.slice(0, 3);
   const priceDelta = balancedTotal === null || variant.strategy === "balanced" ? null : variant.totalRub - balancedTotal;
-  const tradeoff = variant.tradeoffs[0] ?? variant.summary;
+  const tradeoff = formatTradeoff(variant.tradeoffs[0], variant.strategy);
   const priceTone = priceDelta === null ? "Компромисс" : priceDelta < 0 ? `На ${Math.abs(priceDelta).toLocaleString("ru-RU")} ₽ дешевле` : `На ${priceDelta.toLocaleString("ru-RU")} ₽ дороже`;
+  const usefulSummary = strategySummaries[variant.strategy] ?? variant.summary;
 
   return (
-    <article className="variant-card" data-od-id={`variant-card-${variant.id}`}>
+    <article className="variant-card vv-basket-variant-card" data-od-id={`variant-card-${variant.id}`}>
       <button className="variant-card-button" type="button" onClick={onSelect} aria-label={`Открыть вариант ${variant.title}`}>
         <div className="variant-card-top">
           <div>
@@ -312,7 +317,7 @@ export function BasketVariantCard({ variant, recommended, balancedTotal, onSelec
           {recommended && <strong className="recommend-badge">Рекомендуем</strong>}
         </div>
         <strong className="price">{variant.totalRub.toLocaleString("ru-RU")} ₽</strong>
-        <p className="variant-summary">{variant.summary}</p>
+        <p className="variant-summary">{usefulSummary}</p>
         <dl className="variant-metrics">
           <div>
             <dt>Позиций</dt>
@@ -332,16 +337,31 @@ export function BasketVariantCard({ variant, recommended, balancedTotal, onSelec
   );
 }
 
+const strategySummaries: Record<BasketPriority, string> = {
+  balanced: "Подходит, если важны цена и простая готовка.",
+  budget: "Подходит, если нужно уложиться в минимум стоимости.",
+  speed: "Подходит, если важны быстрые блюда без лишней подготовки.",
+};
+
+function formatTradeoff(tradeoff: string | undefined, strategy: BasketPriority) {
+  if (!tradeoff || /не самый деш[её]в/i.test(tradeoff)) {
+    if (strategy === "budget") return "Самый бережный вариант, но выбор блюд проще.";
+    if (strategy === "speed") return "Не самый дешёвый, зато меньше времени на готовку.";
+    return "Не самый дешёвый, зато меньше компромиссов по блюдам.";
+  }
+  return tradeoff;
+}
+
 export function BasketItemRow({ item, onQuantity, onDelete }: { item: BasketItem; onQuantity: (quantity: number) => void; onDelete: () => void }) {
   return (
-    <div className="basket-row">
+    <div className="basket-row vv-basket-item-row">
       <ProductThumb item={item} />
       <div className="basket-row-copy">
         <strong>{item.name}</strong>
         <span>{item.weightLabel ?? roleLabels[item.role] ?? "Продукт"}</span>
       </div>
       <div className="basket-row-actions">
-        <div className="quantity" aria-label="Количество">
+        <div className="quantity" aria-label={`Количество: ${item.name}`}>
           <button type="button" onClick={() => onQuantity(item.quantity - 1)} disabled={item.quantity <= 1} aria-label="Уменьшить"><Minus size={16} /></button>
           <b>{item.quantity}</b>
           <button type="button" onClick={() => onQuantity(item.quantity + 1)} disabled={item.quantity >= 9} aria-label="Увеличить"><Plus size={16} /></button>
@@ -374,7 +394,7 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
 
   return (
     <>
-      <section className="selected-basket" data-od-id="selected-basket">
+      <section className="selected-basket vv-selected-basket" data-od-id="selected-basket">
         <div className="section-heading">
           <div>
             <p className="section-kicker">Выбранная корзина</p>
@@ -404,7 +424,7 @@ function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, onCreateCar
   const label = `${totalRub.toLocaleString("ru-RU")} ₽`;
 
   return (
-    <div className="checkout-bar liquid-glass">
+    <div className="checkout-bar vv-checkout-bar liquid-glass">
       <div>
         <strong>{label}</strong>
         <span>{itemCount} позиций</span>
@@ -427,7 +447,7 @@ export function ErrorNotice({ message, onRetry }: { message: string; onRetry: ()
     <div className="error-notice" aria-live="polite">
       <AlertTriangle size={18} />
       <span>{message}</span>
-      <button type="button" onClick={onRetry}>Повторить</button>
+      <button type="button" onClick={onRetry}><RefreshCw size={16} /> Повторить</button>
     </div>
   );
 }

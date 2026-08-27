@@ -15,10 +15,10 @@ export async function retrieveCandidateProducts(
     .filter((product) => !matchesExclusions(product, intent.excludedIngredients))
     .slice(0, MAX_RAW_CANDIDATES);
 
-  const needsDetails = intent.excludedIngredients.length > 0 || intent.preferences.some((item) => /белк|калор/i.test(item));
+  const needsDetails = deduped.some((product) => !product.imageUrl) || intent.excludedIngredients.length > 0 || intent.preferences.some((item) => /белк|калор/i.test(item));
   if (!needsDetails) return deduped;
 
-  const detailTargets = deduped.filter((product) => !product.composition).slice(0, 10);
+  const detailTargets = deduped.filter((product) => !product.imageUrl || !product.composition).slice(0, 10);
   const details = await runLimited(detailTargets, 3, (product) => catalog.getProductDetails(product.id, signal));
   const detailMap = new Map<string, Partial<NormalizedProduct>>();
   details.forEach((result, index) => {
@@ -28,9 +28,25 @@ export async function retrieveCandidateProducts(
   return deduped
     .map((product) => {
       const details = detailMap.get(product.xmlId);
-      return { ...details, ...product, composition: details?.composition ?? product.composition, calories: details?.calories ?? product.calories, proteins: details?.proteins ?? product.proteins };
+      return mergeProductDetails(product, details);
     })
     .filter((product) => !matchesExclusions(product, intent.excludedIngredients));
+}
+
+function mergeProductDetails(product: NormalizedProduct, details: Partial<NormalizedProduct> | undefined): NormalizedProduct {
+  if (!details) return product;
+  return {
+    ...product,
+    weightLabel: product.weightLabel ?? details.weightLabel,
+    imageUrl: product.imageUrl ?? details.imageUrl,
+    productUrl: product.productUrl ?? details.productUrl,
+    description: details.description ?? product.description,
+    composition: details.composition ?? product.composition,
+    calories: details.calories ?? product.calories,
+    proteins: details.proteins ?? product.proteins,
+    fats: details.fats ?? product.fats,
+    carbohydrates: details.carbohydrates ?? product.carbohydrates,
+  };
 }
 
 async function runLimited<T, R>(

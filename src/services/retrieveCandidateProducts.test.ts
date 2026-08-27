@@ -25,7 +25,9 @@ const baseIntent: BasketIntent = {
 class TestCatalog implements CatalogClient {
   readonly mode = "demo" as const;
   async connect() {}
-  async getProductDetails() { return {}; }
+  async getProductDetails(productId: string) {
+    return productId === "1b" ? { imageUrl: "https://img.vkusvill.ru/product.webp", description: "Крупа для ужина" } : {};
+  }
   async createCartLink() { return ""; }
   async searchProducts(query: SearchQuery): Promise<NormalizedProduct[]> {
     if (query.query === "котлеты") throw new Error("network");
@@ -41,6 +43,6 @@ describe("retrieveCandidateProducts", () => {
   it("keeps successful searches, deduplicates richer products and filters exclusions", async () => {
     const products = await retrieveCandidateProducts(baseIntent, new TestCatalog());
     expect(products).toHaveLength(1);
-    expect(products[0]).toMatchObject({ xmlId: "1", name: "Гречка ядрица", weightLabel: "900 г" });
+    expect(products[0]).toMatchObject({ xmlId: "1", name: "Гречка ядрица", weightLabel: "900 г", imageUrl: "https://img.vkusvill.ru/product.webp" });
   });
 });

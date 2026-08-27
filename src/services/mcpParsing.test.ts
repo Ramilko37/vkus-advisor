@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractCartUrl,
   extractJsonFromText,
+  normalizeProductDetails,
   normalizeSearchProduct,
   parseMcpResponse,
 } from "./mcpParsing";
@@ -42,6 +43,21 @@ describe("MCP parsing", () => {
       reviewsCount: 55968,
       composition: "крупа гречневая",
     });
+  });
+
+  it("normalizes product details images from MCP data wrapper", () => {
+    const details = normalizeProductDetails({
+      ok: true,
+      data: {
+        id: 484,
+        xml_id: 484,
+        name: "Тушка цыпленка-бройлера, охлажденная",
+        price: { current: 294 },
+        images: [{ small: "small.webp", medium: "medium.webp", large: "large.webp" }],
+      },
+    });
+
+    expect(details).toMatchObject({ xmlId: "484", imageUrl: "medium.webp" });
   });
 
   it("returns null when text has no JSON", () => {
