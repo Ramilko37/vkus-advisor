@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, NormalizedProduct, PipelineMetrics, WorkflowStage } from "../types/domain";
 import { analyzeIntent, basketSummary, composeBaskets } from "../services/basketOrchestrator";
 import { BrowserLlmClient, LlmProviderError, getSessionId } from "../services/openRouterClient";
@@ -30,22 +30,26 @@ type Action =
   | { type: "message"; message: ChatMessage }
   | { type: "intent"; intent: BasketIntent }
   | { type: "ready"; intent: BasketIntent; variants: BasketVariant[]; models: string[] }
-  | { type: "select"; id: string }
+  | { type: "select"; id: string | null }
   | { type: "items"; id: string; items: BasketItem[] }
   | { type: "error"; error: AppError; pendingMessage?: string }
   | { type: "clearError" };
 
-const initialState: PlannerState = {
-  stage: "idle",
-  messages: [{ id: crypto.randomUUID(), role: "assistant", createdAt: Date.now(), content: "Расскажите, какую задачу нужно решить с продуктами: на неделю, на семью, бюджет, предпочтения, ограничения — чем подробнее, тем лучше предложу варианты." }],
-  intent: null,
-  variants: [],
-  selectedId: null,
-  error: null,
-  catalogMode: "connecting",
-  modelNames: [],
-  pendingMessage: null,
-};
+const RESULTS_STORAGE_KEY = "vkusvill-advisor:last-results";
+
+function createInitialState(): PlannerState {
+  return {
+    stage: "idle",
+    messages: [{ id: crypto.randomUUID(), role: "assistant", createdAt: Date.now(), content: "Расскажите, какую задачу нужно решить с продуктами: на неделю, на семью, бюджет, предпочтения, ограничения — чем подробнее, тем лучше предложу варианты." }],
+    intent: null,
+    variants: [],
+    selectedId: null,
+    error: null,
+    catalogMode: "connecting",
+    modelNames: [],
+    pendingMessage: null,
+  };
+}
 
 function reducer(state: PlannerState, action: Action): PlannerState {
   switch (action.type) {
@@ -73,13 +77,17 @@ function reducer(state: PlannerState, action: Action): PlannerState {
 }
 
 export function useBasketPlanner() {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(reducer, undefined, restorePlannerState);
   const catalogRef = useRef<CatalogClient | null>(null);
   const candidatePoolRef = useRef<CandidatePool | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const llm = useMemo(() => new BrowserLlmClient(), []);
   const sessionId = useMemo(() => getSessionId(), []);
+
+  useEffect(() => {
+    persistPlannerState(state);
+  }, [state.catalogMode, state.intent, state.modelNames, state.selectedId, state.variants]);
 
   const runWorkflow = useCallback(async (message: string) => {
     abortRef.current?.abort();
@@ -192,11 +200,17 @@ export function useBasketPlanner() {
 
   const createCart = useCallback(async () => {
     const variant = selectedVariant(state);
-    const catalog = catalogRef.current;
-    if (!variant || !catalog) return null;
-    if (catalog.mode === "demo") throw new Error("MCP недоступен из браузера, поэтому сейчас используется демонстрационный каталог.");
-    dispatch({ type: "stage", stage: "creatingCart" });
+    if (!variant) return null;
     try {
+      let catalog = catalogRef.current;
+      if (!catalog) {
+        dispatch({ type: "catalog", mode: "connecting" });
+        catalog = await createCatalogClient();
+        catalogRef.current = catalog;
+        dispatch({ type: "catalog", mode: catalog.mode });
+      }
+      if (catalog.mode === "demo") return null;
+      dispatch({ type: "stage", stage: "creatingCart" });
       const url = await catalog.createCartLink(variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity })));
       dispatch({ type: "stage", stage: "ready" });
       return url;
@@ -214,8 +228,52 @@ export function useBasketPlanner() {
     mockResults,
     createCart,
     selectVariant: (id: string) => dispatch({ type: "select", id }),
+    clearVariantSelection: () => dispatch({ type: "select", id: null }),
     updateItems: (id: string, items: BasketItem[]) => dispatch({ type: "items", id, items }),
   };
+}
+
+function restorePlannerState(): PlannerState {
+  const initial = createInitialState();
+  try {
+    const raw = sessionStorage.getItem(RESULTS_STORAGE_KEY);
+    if (!raw) return initial;
+    const saved = JSON.parse(raw) as Partial<PlannerState> & { schemaVersion?: number };
+    if (saved.schemaVersion !== 1 || !Array.isArray(saved.variants) || saved.variants.length === 0 || !saved.intent) return initial;
+    const selectedId = typeof saved.selectedId === "string" && saved.variants.some((variant) => variant.id === saved.selectedId) ? saved.selectedId : null;
+    return {
+      ...initial,
+      stage: "ready",
+      messages: [
+        ...initial.messages,
+        { id: crypto.randomUUID(), role: "assistant", createdAt: Date.now(), content: "Вернул последнюю подборку. Можно выбрать вариант или собрать новую корзину." },
+      ],
+      intent: saved.intent,
+      variants: saved.variants,
+      selectedId,
+      catalogMode: saved.catalogMode === "live" || saved.catalogMode === "demo" ? saved.catalogMode : "demo",
+      modelNames: Array.isArray(saved.modelNames) ? saved.modelNames.filter((item): item is string => typeof item === "string") : [],
+    };
+  } catch {
+    return initial;
+  }
+}
+
+function persistPlannerState(state: PlannerState) {
+  try {
+    if (!state.intent || state.variants.length === 0) return;
+    sessionStorage.setItem(RESULTS_STORAGE_KEY, JSON.stringify({
+      schemaVersion: 1,
+      intent: state.intent,
+      variants: state.variants,
+      selectedId: state.selectedId,
+      catalogMode: state.catalogMode === "connecting" ? "demo" : state.catalogMode,
+      modelNames: state.modelNames.slice(-4),
+      updatedAt: Date.now(),
+    }));
+  } catch {
+    // Storage can be unavailable in private modes; the app still works in-memory.
+  }
 }
 
 function selectedVariant(state: PlannerState) {

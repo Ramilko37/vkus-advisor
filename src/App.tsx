@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AppShell, BasketResults, BasketResultsSkeleton, ConversationPanel, FullscreenLoader } from "./components";
+import { AppShell, BasketResults, BasketResultsSkeleton, ConversationPanel, EmptyResultsState, FullscreenLoader } from "./components";
 import { useBasketPlanner } from "./hooks/useBasketPlanner";
 import type { WorkflowStage } from "./types/domain";
 
@@ -15,6 +15,11 @@ export function App() {
   const [route, setRoute] = useState<"home" | "results">(currentRoute);
   const hasResults = planner.state.variants.length > 0;
   const loading = loadingStages.includes(planner.state.stage);
+  const debugResults = import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "results";
+  const openHome = () => {
+    window.history.pushState(null, "", "/");
+    setRoute("home");
+  };
 
   useEffect(() => {
     const onPopState = () => setRoute(currentRoute());
@@ -37,17 +42,22 @@ export function App() {
   }, [hasResults, planner.state.stage, route]);
 
   useEffect(() => {
-    if (route === "results" && !hasResults && !loading) {
-      window.history.replaceState(null, "", "/");
-      setRoute("home");
+    if (route === "results" && !hasResults && !loading && debugResults) {
+      planner.mockResults();
     }
-  }, [hasResults, loading, route]);
+  }, [debugResults, hasResults, loading, planner.mockResults, route]);
 
   return (
     <>
       <AppShell route={route}>
         {route === "results" ? (
-          hasResults ? <BasketResults planner={planner} /> : <BasketResultsSkeleton stage={planner.state.stage} />
+          hasResults ? (
+            <BasketResults planner={planner} />
+          ) : loading || debugResults ? (
+            <BasketResultsSkeleton stage={planner.state.stage} />
+          ) : (
+            <EmptyResultsState onStart={openHome} />
+          )
         ) : (
           <ConversationPanel planner={planner} />
         )}

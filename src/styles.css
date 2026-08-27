@@ -23,11 +23,11 @@
   --surface-soft: #fbfcfa;
   --text-primary: #172019;
   --text-secondary: #58635a;
-  --text-muted: #747c75;
+  --text-muted: #687268;
   --border: rgba(23, 32, 25, 0.1);
   --border-strong: rgba(23, 32, 25, 0.16);
-  --accent: #16a34a;
-  --accent-hover: #11843c;
+  --accent: #0f7837;
+  --accent-hover: #0b6f32;
   --accent-soft: #e9f7ec;
   --accent-on: #ffffff;
   --warning: #9a6700;
@@ -40,7 +40,18 @@
   --empty-a: #eaf7ec;
   --shadow-card: 0 12px 30px rgba(23, 32, 25, 0.08);
   --shadow-soft: 0 18px 48px rgba(23, 32, 25, 0.12);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  --font-ui: "Noto Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-size-body: 16px;
+  --line-height-body: 1.5;
+  --font-weight-body: 500;
+  --font-weight-strong: 720;
+  --font-weight-action: 780;
+  --font-weight-kicker: 850;
+  --font-size-label: 13px;
+  --font-size-meta: 12px;
+
+  font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--background);
 }
@@ -59,6 +70,14 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background: var(--background);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-body);
+  line-height: var(--line-height-body);
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -121,9 +140,9 @@ button:disabled {
 .brand-kicker,
 .section-kicker {
   margin: 0;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 850;
+  color: var(--accent-hover);
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-kicker);
   line-height: 1.2;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -142,7 +161,7 @@ button:disabled {
 
 .header h1 {
   font-size: clamp(40px, 11vw, 52px);
-  font-weight: 760;
+  font-weight: var(--font-weight-action);
 }
 
 .header-copy {
@@ -179,7 +198,7 @@ button:disabled {
 .selected-basket h2 {
   margin-top: var(--space-1);
   font-size: 28px;
-  font-weight: 720;
+  font-weight: var(--font-weight-strong);
   overflow-wrap: anywhere;
   hyphens: auto;
 }
@@ -205,7 +224,7 @@ button:disabled {
 .composer label {
   color: var(--text-primary);
   font-size: 20px;
-  font-weight: 760;
+  font-weight: var(--font-weight-action);
   line-height: 1.2;
 }
 
@@ -246,7 +265,7 @@ button:disabled {
   padding: 0 var(--space-4);
   background: var(--accent);
   color: var(--accent-on);
-  font-weight: 780;
+  font-weight: var(--font-weight-action);
   text-decoration: none;
   cursor: pointer;
   box-shadow: 0 12px 22px rgba(22, 163, 74, 0.22);
@@ -280,7 +299,7 @@ button:disabled {
   padding: 0 var(--space-4);
   background: var(--surface);
   color: var(--text-primary);
-  font-weight: 700;
+  font-weight: var(--font-weight-strong);
   text-decoration: none;
   cursor: pointer;
 }
@@ -294,7 +313,7 @@ button:disabled {
 }
 
 .link-button {
-  color: var(--accent);
+  color: var(--accent-hover);
 }
 
 .message-list {
@@ -329,11 +348,11 @@ button:disabled {
   display: block;
   margin-top: var(--space-2);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-meta);
 }
 
 .message.user time {
-  color: rgba(255, 255, 255, 0.76);
+  color: rgba(255, 255, 255, 0.86);
 }
 
 .chips {
@@ -410,7 +429,7 @@ button:disabled {
   align-items: center;
   gap: var(--space-2);
   padding: 0;
-  font-weight: 780;
+  font-weight: var(--font-weight-action);
   cursor: pointer;
 }
 
@@ -445,7 +464,7 @@ button:disabled {
 
 .examples button span {
   min-width: 0;
-  font-weight: 780;
+  font-weight: var(--font-weight-action);
   overflow-wrap: anywhere;
 }
 
@@ -459,13 +478,26 @@ button:disabled {
 .examples button b {
   grid-column: 2;
   grid-row: 1 / span 2;
-  color: var(--accent);
+  color: var(--accent-hover);
   font-size: 24px;
 }
 
 .variant-list {
   display: grid;
   gap: var(--space-4);
+}
+
+.variant-deck {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 560px;
+  height: clamp(560px, calc(100svh - 180px), 690px);
+  margin-inline: calc(-1 * clamp(16px, 5vw, 22px));
+  padding-inline: clamp(16px, 5vw, 22px);
+  overflow: hidden;
+  touch-action: pan-y;
+  isolation: isolate;
 }
 
 .variant-card {
@@ -475,6 +507,53 @@ button:disabled {
   background: var(--surface);
   box-shadow: var(--shadow-card);
   overflow: hidden;
+}
+
+.variant-deck .variant-card {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: min(80vw, 500px);
+  max-width: calc(100vw - 54px);
+  background: var(--surface);
+  transform-origin: 50% 78%;
+  transition:
+    transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 220ms ease,
+    filter 220ms ease,
+    box-shadow 220ms ease;
+  will-change: transform;
+}
+
+.variant-deck .variant-card[data-position="active"] {
+  z-index: 3;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0) rotate(0deg) scale(1);
+  box-shadow: 0 18px 46px rgba(23, 32, 25, 0.12);
+}
+
+.variant-deck .variant-card[data-position="prev"] {
+  z-index: 1;
+  opacity: 0.72;
+  transform: translateX(calc(-50% - min(62vw, 360px))) translateY(78px) rotate(-6deg) scale(0.92);
+}
+
+.variant-deck .variant-card[data-position="next"] {
+  z-index: 1;
+  opacity: 0.72;
+  transform: translateX(calc(-50% + min(62vw, 360px))) translateY(78px) rotate(6deg) scale(0.92);
+}
+
+.variant-deck .variant-card[data-position="hidden"] {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(96px) scale(0.86);
+}
+
+.variant-deck .variant-card:not([data-position="active"]) {
+  cursor: pointer;
+  filter: saturate(0.94);
 }
 
 .variant-card-button {
@@ -492,6 +571,10 @@ button:disabled {
 
 .variant-card-button:hover {
   background: var(--surface-soft);
+}
+
+.variant-deck .variant-card-button:hover {
+  background: transparent;
 }
 
 .variant-card-button:focus-visible {
@@ -519,7 +602,7 @@ button:disabled {
   color: var(--text-primary);
   font-size: 24px;
   line-height: 1.12;
-  font-weight: 720;
+  font-weight: var(--font-weight-strong);
   overflow-wrap: anywhere;
   hyphens: auto;
 }
@@ -537,7 +620,7 @@ button:disabled {
   padding: var(--space-1) var(--space-3);
   background: var(--accent-soft);
   color: var(--accent-hover);
-  font-size: 13px;
+  font-size: var(--font-size-label);
   line-height: 1.55;
 }
 
@@ -546,7 +629,7 @@ button:disabled {
   color: var(--text-primary);
   font-size: clamp(44px, 12vw, 60px);
   line-height: 0.92;
-  font-weight: 780;
+  font-weight: var(--font-weight-action);
   font-variant-numeric: tabular-nums;
 }
 
@@ -576,13 +659,13 @@ button:disabled {
 .variant-metrics dt {
   margin: 0 0 var(--space-1);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-meta);
 }
 
 .variant-metrics dd {
   margin: 0;
   color: var(--text-primary);
-  font-weight: 760;
+  font-weight: var(--font-weight-action);
   overflow-wrap: anywhere;
 }
 
@@ -619,6 +702,64 @@ button:disabled {
   background: var(--surface-soft);
 }
 
+.variant-card-action {
+  min-height: 48px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: var(--radius-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-4);
+  background: color-mix(in srgb, var(--accent) 8%, white);
+  color: var(--accent-hover);
+  font-weight: var(--font-weight-action);
+}
+
+.variant-card.active .variant-card-action {
+  border-color: transparent;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 42%),
+    var(--accent);
+  color: var(--accent-on);
+  box-shadow: 0 12px 22px rgba(22, 163, 74, 0.2);
+}
+
+.deck-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  margin-top: calc(-1 * var(--space-8));
+}
+
+.deck-dots button {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  cursor: pointer;
+}
+
+.deck-dots button::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text-muted) 26%, transparent);
+  transition:
+    width 160ms ease,
+    background-color 160ms ease;
+}
+
+.deck-dots button.active::after {
+  width: 28px;
+  background: var(--accent);
+}
+
 .selected-basket {
   position: relative;
   display: grid;
@@ -643,7 +784,7 @@ button:disabled {
   min-height: 48px;
   border-radius: var(--radius-pill);
   padding: 0 var(--space-4);
-  color: var(--accent);
+  color: var(--accent-hover);
 }
 
 .selected-basket .section-heading {
@@ -684,7 +825,7 @@ button:disabled {
   display: grid;
   place-items: center;
   color: var(--accent-hover);
-  font-weight: 850;
+  font-weight: var(--font-weight-kicker);
 }
 
 .basket-row-copy {
@@ -792,7 +933,7 @@ button:disabled {
 
 .checkout-bar span {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-label);
 }
 
 .checkout-button {
@@ -859,9 +1000,9 @@ button:disabled {
 
 .loader-kicker {
   margin: 0;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 850;
+  color: var(--accent-hover);
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-kicker);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -898,7 +1039,7 @@ button:disabled {
   place-items: center;
   background: var(--surface);
   color: var(--text-muted);
-  font-weight: 780;
+  font-weight: var(--font-weight-action);
 }
 
 .loader-steps strong,
@@ -956,6 +1097,10 @@ button:disabled {
 .empty-state p {
   max-width: 32ch;
   margin: 0;
+}
+
+.empty-state .primary-button {
+  margin-top: var(--space-2);
 }
 
 .dialog-backdrop {
@@ -1031,6 +1176,11 @@ button:disabled {
   .variant-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: stretch;
+  }
+
+  .variant-deck {
+    display: block;
+    height: clamp(600px, calc(100svh - 188px), 720px);
   }
 
   .variant-card-button {

@@ -5,7 +5,7 @@
   --vv-surface-soft: #fbfcfa;
   --vv-text-primary: #172019;
   --vv-text-secondary: #58635a;
-  --vv-text-tertiary: #747c75;
+  --vv-text-tertiary: #687268;
   --vv-control: rgba(23, 32, 25, 0.1);
   --vv-control-strong: rgba(23, 32, 25, 0.16);
   --vv-focus: color-mix(in srgb, var(--g2-focus) 52%, var(--accent));
@@ -22,7 +22,7 @@ body {
 }
 
 .kit-shell {
-  font-family: var(--g2-font-family);
+  font-family: var(--font-ui);
 }
 
 .kit-home,
@@ -36,14 +36,14 @@ body {
 
 .vv-kicker,
 .section-kicker {
-  color: var(--accent);
-  font-weight: var(--g2-font-weight-bold);
+  color: var(--accent-hover);
+  font-weight: var(--font-weight-kicker);
 }
 
 .vv-title,
 .compact-heading h2,
 .selected-basket h2 {
-  font-weight: var(--g2-font-weight-bold);
+  font-weight: var(--font-weight-strong);
 }
 
 .vv-copy,
@@ -61,7 +61,7 @@ body {
   border-color: rgba(255, 255, 255, 0.72);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.88),
-    0 16px 42px rgba(23, 32, 25, 0.12);
+    0 16px 36px rgba(23, 32, 25, 0.12);
   backdrop-filter: blur(18px) saturate(1.18);
 }
 

@@ -1,5 +1,5 @@
-import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, Minus, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
-import { FormEvent, KeyboardEvent, ReactNode, useMemo, useState } from "react";
+import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, Minus, Plus, RefreshCw, Send, ShoppingBasket, Trash2 } from "lucide-react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { BasketItem, BasketPriority, BasketVariant, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
 
@@ -110,7 +110,7 @@ export function CatalogStatus({ mode, onReconnect }: { mode: "live" | "demo" | "
   return (
     <div className="catalog-status demo" aria-live="polite">
       <AlertTriangle size={17} />
-      <span>Каталог временно недоступен. Показываем пример на тестовых товарах.</span>
+      <span>Показываем пример корзины. Можно скопировать список или попробовать подключить каталог ещё раз.</span>
       <button type="button" onClick={onReconnect}><RefreshCw size={16} /> Повторить</button>
     </div>
   );
@@ -219,7 +219,10 @@ export function ChatComposer({ value, onChange, onSubmit, busy }: { value: strin
 }
 
 export function BasketResults({ planner }: { planner: Planner }) {
-  const [openedId, setOpenedId] = useState<string | null>(null);
+  const [openedId, setOpenedId] = useState<string | null>(planner.state.selectedId);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const swipeStartX = useRef<number | null>(null);
+  const variants = planner.state.variants;
   const selected = planner.state.variants.find((variant) => variant.id === openedId) ?? null;
   const balancedTotal = planner.state.variants.find((variant) => variant.strategy === "balanced")?.totalRub ?? planner.state.variants[0]?.totalRub ?? null;
   const openVariant = (id: string) => {
@@ -227,12 +230,29 @@ export function BasketResults({ planner }: { planner: Planner }) {
     setOpenedId(id);
     scrollToTop();
   };
+  const setSafeIndex = (index: number) => setActiveIndex((index + variants.length) % variants.length);
+  const moveActive = (step: number) => setActiveIndex((index) => (index + step + variants.length) % variants.length);
+  const positionFor = (index: number) => {
+    if (index === activeIndex) return "active";
+    if (index === (activeIndex + 1) % variants.length) return "next";
+    if (index === (activeIndex - 1 + variants.length) % variants.length) return "prev";
+    return "hidden";
+  };
+
+  useEffect(() => {
+    if (activeIndex >= variants.length) setActiveIndex(0);
+  }, [activeIndex, variants.length]);
+
+  useEffect(() => {
+    if (planner.state.selectedId && !openedId) setOpenedId(planner.state.selectedId);
+  }, [openedId, planner.state.selectedId]);
 
   if (selected) {
     return (
       <section className="results-panel kit-results basket-step" aria-label="Состав выбранной корзины" data-od-id="results-panel">
         <div className="basket-step-header">
           <button className="link-button step-back liquid-glass" type="button" onClick={() => {
+            planner.clearVariantSelection();
             setOpenedId(null);
             scrollToTop();
           }}>
@@ -259,16 +279,58 @@ export function BasketResults({ planner }: { planner: Planner }) {
         </div>
       </div>
       {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
-      <div className="variant-list" data-od-id="variant-grid">
-        {planner.state.variants.map((variant) => (
+      <div
+        className="variant-list variant-deck"
+        data-od-id="variant-grid"
+        onPointerDown={(event) => {
+          swipeStartX.current = event.clientX;
+        }}
+        onPointerUp={(event) => {
+          if (swipeStartX.current === null) return;
+          const delta = event.clientX - swipeStartX.current;
+          swipeStartX.current = null;
+          if (Math.abs(delta) > 44) moveActive(delta < 0 ? 1 : -1);
+        }}
+      >
+        {variants.map((variant, index) => {
+          const active = index === activeIndex;
+          return (
           <BasketVariantCard
             key={variant.id}
             variant={variant}
+            active={active}
+            position={positionFor(index)}
             recommended={variant.strategy === "balanced"}
             balancedTotal={balancedTotal}
-            onSelect={() => openVariant(variant.id)}
+            onSelect={() => active ? openVariant(variant.id) : setSafeIndex(index)}
+          />
+          );
+        })}
+      </div>
+      <div className="deck-dots" aria-label="Переключить сценарий корзины">
+        {variants.map((variant, index) => (
+          <button
+            key={variant.id}
+            type="button"
+            className={index === activeIndex ? "active" : ""}
+            onClick={() => setSafeIndex(index)}
+            aria-label={`Показать вариант ${strategyLabels[variant.strategy] ?? variant.title}`}
+            aria-current={index === activeIndex}
           />
         ))}
+      </div>
+    </section>
+  );
+}
+
+export function EmptyResultsState({ onStart }: { onStart: () => void }) {
+  return (
+    <section className="results-panel empty-results-panel" aria-label="Подборка не найдена" data-od-id="empty-results-panel">
+      <div className="empty-state liquid-glass">
+        <ShoppingBasket aria-hidden="true" />
+        <h2>Подборка не найдена</h2>
+        <p>Здесь появятся варианты корзины после запроса. Можно вернуться и собрать новую умную корзину.</p>
+        <button className="primary-button" type="button" onClick={onStart}>Собрать корзину</button>
       </div>
     </section>
   );
@@ -299,7 +361,7 @@ export function BasketResultsSkeleton({ stage }: { stage: WorkflowStage }) {
   );
 }
 
-export function BasketVariantCard({ variant, recommended, balancedTotal, onSelect }: { variant: BasketVariant; recommended: boolean; balancedTotal: number | null; onSelect: () => void }) {
+export function BasketVariantCard({ variant, active, position, recommended, balancedTotal, onSelect }: { variant: BasketVariant; active: boolean; position?: "active" | "prev" | "next" | "hidden"; recommended: boolean; balancedTotal: number | null; onSelect: () => void }) {
   const visibleItems = variant.items.slice(0, 3);
   const priceDelta = balancedTotal === null || variant.strategy === "balanced" ? null : variant.totalRub - balancedTotal;
   const tradeoff = formatTradeoff(variant.tradeoffs[0], variant.strategy);
@@ -307,8 +369,8 @@ export function BasketVariantCard({ variant, recommended, balancedTotal, onSelec
   const usefulSummary = strategySummaries[variant.strategy] ?? variant.summary;
 
   return (
-    <article className="variant-card vv-basket-variant-card" data-od-id={`variant-card-${variant.id}`}>
-      <button className="variant-card-button" type="button" onClick={onSelect} aria-label={`Открыть вариант ${variant.title}`}>
+    <article className={`variant-card vv-basket-variant-card ${active ? "active" : ""}`} data-position={position} data-od-id={`variant-card-${variant.id}`}>
+      <button className="variant-card-button" type="button" onClick={onSelect} aria-label={active ? `Открыть корзину ${variant.title}` : `Показать вариант ${variant.title}`}>
         <div className="variant-card-top">
           <div>
             <h2>{strategyLabels[variant.strategy] ?? variant.title}</h2>
@@ -320,11 +382,11 @@ export function BasketVariantCard({ variant, recommended, balancedTotal, onSelec
         <p className="variant-summary">{usefulSummary}</p>
         <dl className="variant-metrics">
           <div>
-            <dt>Позиций</dt>
+            <dt>В корзине</dt>
             <dd>{variant.uniqueItemsCount}</dd>
           </div>
           <div>
-            <dt>Сравнение</dt>
+            <dt>По цене</dt>
             <dd>{priceTone}</dd>
           </div>
         </dl>
@@ -332,6 +394,7 @@ export function BasketVariantCard({ variant, recommended, balancedTotal, onSelec
           {visibleItems.map((item) => <li key={item.xmlId}><span>{item.name}</span><b>{item.quantity} шт.</b></li>)}
         </ul>
         <p className="tradeoff-line">{tradeoff}</p>
+        <span className="variant-card-action">{active ? "Открыть корзину" : "Посмотреть вариант"}</span>
       </button>
     </article>
   );
@@ -406,7 +469,7 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
         <div className="rows">
           {variant.items.map((item) => <BasketItemRow key={item.xmlId} item={item} onQuantity={(quantity) => update(item.xmlId, quantity)} onDelete={() => remove(item.xmlId)} />)}
         </div>
-        {mode === "demo" && <p className="demo-note">Каталог временно недоступен. Сумма рассчитана по тестовым данным.</p>}
+        {mode === "demo" && <p className="demo-note">Это пример корзины: цены и товары нужны для ориентира. Список можно скопировать.</p>}
       </section>
       <CheckoutBar
         totalRub={variant.totalRub}
@@ -430,7 +493,7 @@ function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, onCreateCar
         <span>{itemCount} позиций</span>
       </div>
       {mode === "demo" ? (
-        <button className="primary-button checkout-button" type="button" disabled>Каталог недоступен</button>
+        <button className="primary-button checkout-button" type="button" disabled>Ссылка недоступна</button>
       ) : cartUrl ? (
         <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> Открыть</a>
       ) : (
@@ -456,7 +519,7 @@ export function DemoModeBanner({ onReconnect }: { onReconnect: () => void }) {
   return (
     <div className="demo-banner">
       <AlertTriangle size={18} />
-      <span>Каталог временно недоступен. Ниже показан тестовый пример.</span>
+      <span>Каталог не ответил, поэтому показываем пример. Его можно открыть, сравнить и скопировать.</span>
       <button type="button" onClick={onReconnect}>Повторить</button>
     </div>
   );
