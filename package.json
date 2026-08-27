@@ -11,6 +11,7 @@
     "start": "node server.mjs",
     "lint": "eslint .",
     "test": "vitest run",
+    "benchmark:models": "node --experimental-strip-types scripts/benchmark-models.ts",
     "benchmark:pipeline": "node --experimental-strip-types scripts/benchmark-pipeline.mjs"
   },
   "dependencies": {

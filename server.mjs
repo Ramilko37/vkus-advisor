@@ -70,35 +70,60 @@ async function handleOpenRouter(req, res) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return send(res, 401, { error: "OPENROUTER_API_KEY is missing" });
   const body = await readJson(req);
-  const result = await openRouterRequest(apiKey, body, "json_schema");
+  const result = await openRouterRequest(apiKey, body);
   return send(res, 200, result);
 }
 
-async function openRouterRequest(apiKey, body, format) {
-  const config = generationConfig(body.stage);
-  const primaryModel = effectiveModel(config.model);
-  const models = [primaryModel, config.fallbackModel ? effectiveModel(config.fallbackModel) : primaryModel].filter((model, index, all) => model && all.indexOf(model) === index).slice(0, 2);
+export async function openRouterStructuredRequest(apiKey, body, options = {}) {
+  const baseConfig = generationConfig(body.stage);
+  const config = {
+    ...baseConfig,
+    model: options.model ?? baseConfig.model,
+    fallbackModel: options.fallbackModel === undefined ? baseConfig.fallbackModel : options.fallbackModel,
+    temperature: options.temperature ?? baseConfig.temperature,
+    maxTokens: options.maxTokens ?? body.maxTokens ?? baseConfig.maxTokens,
+  };
+  const primaryModel = options.resolveAlias === false ? config.model : effectiveModel(config.model);
+  const fallback = options.resolveAlias === false ? config.fallbackModel : effectiveModel(config.fallbackModel);
+  const models = [primaryModel, fallback || primaryModel].filter((model, index, all) => model && all.indexOf(model) === index).slice(0, 2);
+  const formats = options.formats || ["json_schema", "json_object"];
   let lastError = null;
-  for (const [index, model] of models.entries()) {
-    try {
-      const result = await openRouterFetch(apiKey, body, format, model, config, index);
-      return {
-        ...result,
-        retryCount: index,
-        fallbackModelUsed: model !== primaryModel,
-      };
-    } catch (error) {
-      lastError = error;
-      if (!isRetryableOpenRouterError(error) || index === 1) break;
+  let attempt = 0;
+  for (const model of models) {
+    for (const format of formats) {
+      try {
+        const result = await openRouterFetch(apiKey, body, format, model, config, attempt);
+        return {
+          ...result,
+          retryCount: attempt,
+          fallbackModelUsed: model !== primaryModel,
+        };
+      } catch (error) {
+        lastError = error;
+        if (!options.silent) console.warn("openrouter_attempt_failed", {
+          stage: config.stage,
+          model,
+          format,
+          status: error?.status,
+          openRouterStatus: error?.openRouterStatus,
+          message: String(error?.message || error).slice(0, 240),
+        });
+        attempt += 1;
+        if (!isRetryableOpenRouterError(error)) throw error;
+      }
     }
   }
   throw lastError;
 }
 
+async function openRouterRequest(apiKey, body) {
+  return openRouterStructuredRequest(apiKey, body);
+}
+
 async function openRouterFetch(apiKey, body, format, model, config, retryIndex) {
   const startedAt = performance.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
   let response;
   try {
     response = await fetch(openRouterUrl, {
@@ -126,7 +151,15 @@ async function openRouterFetch(apiKey, body, format, model, config, retryIndex) 
     error.openRouterStatus = response.status;
     throw error;
   }
-  const payload = await response.json();
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    const error = new Error("Invalid OpenRouter response JSON");
+    error.status = 502;
+    error.openRouterStatus = 502;
+    throw error;
+  }
   const content = payload.choices?.[0]?.message?.content || "";
   const finishReason = payload.choices?.[0]?.finish_reason;
   if (finishReason === "content_filter") {
@@ -135,15 +168,16 @@ async function openRouterFetch(apiKey, body, format, model, config, retryIndex) 
     throw error;
   }
   const parsed = extractJsonFromText(content);
-  if (!parsed) {
+  if (!parsed.ok) {
     const error = new Error("Invalid OpenRouter JSON");
+    error.status = finishReason === "length" ? 504 : 502;
     error.content = content;
     error.finishReason = finishReason;
-    error.openRouterStatus = finishReason === "length" ? 504 : 502;
+    error.openRouterStatus = error.status;
     throw error;
   }
   return {
-    data: parsed,
+    data: parsed.value,
     model: payload.model || model,
     finishReason,
     durationMs: Math.round(performance.now() - startedAt),
@@ -154,6 +188,8 @@ async function openRouterFetch(apiKey, body, format, model, config, retryIndex) 
       reasoningTokens: payload.usage.completion_tokens_details?.reasoning_tokens,
       cachedTokens: payload.usage.prompt_tokens_details?.cached_tokens,
     } : undefined,
+    responseFormat: format,
+    repairRequired: parsed.repairRequired,
   };
 }
 
@@ -206,6 +242,7 @@ function generationConfig(stage) {
     fallbackModel: isBasket ? basketFallbackModel : intentFallbackModel,
     temperature: isBasket ? 0.1 : 0,
     maxTokens: Number(isBasket ? process.env.OPENROUTER_BASKET_MAX_TOKENS || 1800 : process.env.OPENROUTER_INTENT_MAX_TOKENS || 600),
+    timeoutMs: Number(isBasket ? process.env.OPENROUTER_BASKET_TIMEOUT_MS || 75_000 : process.env.OPENROUTER_INTENT_TIMEOUT_MS || 45_000),
     providerSort: isBasket ? "throughput" : "latency",
   };
 }
@@ -350,14 +387,14 @@ function loadDotEnv() {
 
 function extractJsonFromText(text) {
   try {
-    return JSON.parse(text);
+    return { ok: true, value: JSON.parse(text), repairRequired: false };
   } catch {
     // Try fenced or embedded JSON below.
   }
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fenced) {
     try {
-      return JSON.parse(fenced[1].trim());
+      return { ok: true, value: JSON.parse(fenced[1].trim()), repairRequired: true };
     } catch {
       // Try balanced embedded JSON below.
     }
@@ -385,21 +422,27 @@ function extractJsonFromText(text) {
     if (char === closer) depth -= 1;
     if (depth === 0) {
       try {
-        return JSON.parse(text.slice(start, i + 1));
+        return { ok: true, value: JSON.parse(text.slice(start, i + 1)), repairRequired: true };
       } catch {
-        return null;
+        return { ok: false };
       }
     }
   }
-  return null;
+  return { ok: false };
 }
 
 function parseMcpResponse(value) {
-  if (typeof value === "string") return extractJsonFromText(value) || value;
+  if (typeof value === "string") {
+    const parsed = extractJsonFromText(value);
+    return parsed.ok ? parsed.value : value;
+  }
   const content = value?.content;
   if (Array.isArray(content)) {
     for (const part of content) {
-      if (typeof part.text === "string") return extractJsonFromText(part.text) || part.text;
+      if (typeof part.text === "string") {
+        const parsed = extractJsonFromText(part.text);
+        return parsed.ok ? parsed.value : part.text;
+      }
     }
   }
   return value;

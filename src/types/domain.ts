@@ -116,6 +116,7 @@ export interface StructuredGenerationResult<T> {
   durationMs?: number;
   retryCount?: number;
   fallbackModelUsed?: boolean;
+  repairRequired?: boolean;
 }
 
 export interface PipelineMetrics {

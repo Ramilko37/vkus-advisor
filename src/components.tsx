@@ -1,6 +1,6 @@
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, ExternalLink, Loader2, Minus, Plus, RefreshCw, Send, ShoppingBasket, Trash2, UserRound } from "lucide-react";
-import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactNode, useMemo, useRef, useState } from "react";
-import type { BasketItem, BasketVariant, WorkflowStage } from "./types/domain";
+import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, Minus, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
+import { FormEvent, KeyboardEvent, ReactNode, useMemo, useState } from "react";
+import type { BasketItem, BasketPriority, BasketVariant, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
 
 type Planner = ReturnType<typeof useBasketPlanner>;
@@ -12,14 +12,38 @@ const examples = [
 ];
 
 const stageLabels: Record<WorkflowStage, string> = {
-  idle: "Готово помочь",
-  analyzing: "Понимаю задачу",
-  clarifying: "Нужно одно уточнение",
-  searching: "Ищу подходящие товары",
-  composing: "Собираю варианты",
+  idle: "Готово",
+  analyzing: "Разбираем запрос",
+  clarifying: "Нужно уточнение",
+  searching: "Ищем товары",
+  composing: "Собираем варианты",
   ready: "Готово к выбору",
-  creatingCart: "Создаю ссылку",
+  creatingCart: "Готовим корзину",
   error: "Нужна правка",
+};
+
+const strategyLabels: Record<BasketPriority, string> = {
+  balanced: "Сбалансированная",
+  budget: "Экономная",
+  speed: "Самая простая",
+};
+
+const strategyMeta: Record<BasketPriority, string> = {
+  balanced: "Компромисс цены и удобства",
+  budget: "Минимум стоимости",
+  speed: "Меньше готовки",
+};
+
+const roleLabels: Record<string, string> = {
+  breakfast: "Завтрак",
+  main: "Основное",
+  protein: "Белок",
+  side: "Гарнир",
+  vegetables: "Овощи",
+  snack: "Перекус",
+  ready_food: "Готовая еда",
+  drink: "Напиток",
+  other: "Продукт",
 };
 
 export function AppShell({ children, route }: { children: ReactNode; route: "home" | "results" }) {
@@ -34,21 +58,13 @@ export function AppShell({ children, route }: { children: ReactNode; route: "hom
 }
 
 export function Header({ route }: { route: "home" | "results" }) {
+  if (route === "results") return null;
+
   return (
     <header className="header" data-od-id="app-header">
-      <button className="avatar-button" type="button" aria-label="Профиль"><UserRound size={18} /></button>
-      {route === "home" && (
-        <>
-          <div className="brand-row">
-            <div className="brand-mark" aria-hidden="true"><ShoppingBasket size={22} /></div>
-            <div>
-              <p className="brand-kicker">Сервис подбора продуктов</p>
-              <h1>Умная корзина</h1>
-            </div>
-          </div>
-          <p className="header-copy">Расскажите, что вам нужно. Мы соберём три варианта корзины.</p>
-        </>
-      )}
+      <p className="brand-kicker">ВкусВилл Advisor</p>
+      <h1>Умная корзина</h1>
+      <p className="header-copy">Расскажите, что нужно купить — подберём три варианта.</p>
     </header>
   );
 }
@@ -56,33 +72,42 @@ export function Header({ route }: { route: "home" | "results" }) {
 export function ConversationPanel({ planner }: { planner: Planner }) {
   const [text, setText] = useState("");
   const showMessages = planner.state.messages.length > 1 || planner.state.stage === "clarifying" || planner.state.stage === "error";
+  const busy = ["analyzing", "searching", "composing", "creatingCart"].includes(planner.state.stage);
   const submit = (value = text) => {
     void planner.submit(value);
     setText("");
   };
 
   return (
-    <section className="conversation-panel" aria-label="Разговор" data-od-id="conversation-panel">
+    <section className="conversation-panel" aria-label="Подбор корзины" data-od-id="conversation-panel">
       {showMessages && <MessageList messages={planner.state.messages} />}
+      <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} />
       <IntentChips intent={planner.state.intent} />
       {planner.state.error && <ErrorNotice message={planner.state.error.message} onRetry={planner.retry} />}
-      <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={["analyzing", "searching", "composing", "creatingCart"].includes(planner.state.stage)} />
       <CatalogStatus mode={planner.state.catalogMode} onReconnect={planner.reconnectCatalog} />
       <PromptExamples onPick={setText} />
       {import.meta.env.DEV && <button className="debug-results-button" type="button" onClick={planner.mockResults}>Debug: результаты</button>}
-      <p className="result-note">Подберём реальные товары и предложим три варианта: сбалансированный, экономный и быстрый.</p>
     </section>
   );
 }
 
 export function CatalogStatus({ mode, onReconnect }: { mode: "live" | "demo" | "connecting"; onReconnect: () => void }) {
   if (mode === "live") return null;
-  const label = mode === "connecting" ? "Подключаем каталог..." : "Демонстрационный режим";
+
+  if (mode === "connecting") {
+    return (
+      <div className="catalog-status connecting" aria-live="polite">
+        <Loader2 className="spin" size={17} />
+        <span>Подключаем каталог...</span>
+      </div>
+    );
+  }
+
   return (
-    <div className={`catalog-status ${mode}`} aria-live="polite">
-      {mode === "connecting" ? <Loader2 className="spin" size={17} /> : <AlertTriangle size={17} />}
-      <span>{label}</span>
-      {mode === "demo" && <button type="button" onClick={onReconnect}><RefreshCw size={16} /> Повторить</button>}
+    <div className="catalog-status demo" aria-live="polite">
+      <AlertTriangle size={17} />
+      <span>Каталог временно недоступен. Показываем пример на тестовых товарах.</span>
+      <button type="button" onClick={onReconnect}><RefreshCw size={16} /> Повторить</button>
     </div>
   );
 }
@@ -116,7 +141,7 @@ export function IntentChips({ intent }: { intent: Planner["state"]["intent"] }) 
     intent.priority === "budget" ? "экономия" : intent.priority === "speed" ? "проще" : "баланс",
   ];
   return (
-    <div className="chips" aria-label="Извлечённые параметры">
+    <div className="chips" aria-label="Параметры запроса">
       {chips.map((chip) => <span key={chip}>{chip}</span>)}
       {intent.assumptions.map((item) => <span key={item} className="assumption">{item}</span>)}
     </div>
@@ -124,25 +149,29 @@ export function IntentChips({ intent }: { intent: Planner["state"]["intent"] }) 
 }
 
 export function FullscreenLoader({ stage }: { stage: WorkflowStage }) {
-  const notes: Record<string, string> = {
-    analyzing: "Выделяю бюджет, дни и ограничения",
-    searching: "Сверяю запросы с каталогом",
-    composing: "Собираю три сценария корзины",
-    creatingCart: "Готовлю ссылку на корзину",
-  };
+  const steps: Array<{ id: WorkflowStage; title: string; text: string }> = [
+    { id: "analyzing", title: "Запрос", text: "Выделяем дни, бюджет и ограничения" },
+    { id: "searching", title: "Каталог", text: "Ищем подходящие товары" },
+    { id: "composing", title: "Варианты", text: "Сравниваем три корзины" },
+  ];
+  const activeIndex = Math.max(0, steps.findIndex((step) => step.id === stage));
 
   return (
     <div className="liquid-loader-backdrop" role="status" aria-live="polite" aria-busy="true">
-      <div className="liquid-loader-card">
-        <div className="liquid-loader-mark" aria-hidden="true">
-          <ShoppingBasket size={34} />
-        </div>
-        <div className="liquid-loader-copy">
-          <span>{stageLabels[stage]}</span>
-          <strong>{notes[stage] ?? "Обновляю подборку"}</strong>
-          <small>AI подбирает продукты и проверяет варианты корзины</small>
-        </div>
-        <div className="liquid-loader-line" aria-hidden="true" />
+      <div className="liquid-loader-card liquid-glass">
+        <p className="loader-kicker">{stageLabels[stage]}</p>
+        <h2>{stage === "creatingCart" ? "Готовим ссылку на корзину" : "Подбираем корзину"}</h2>
+        <ol className="loader-steps">
+          {steps.map((step, index) => (
+            <li key={step.id} className={index < activeIndex ? "done" : index === activeIndex ? "current" : ""}>
+              <span aria-hidden="true">{index < activeIndex ? "✓" : index + 1}</span>
+              <div>
+                <strong>{step.title}</strong>
+                <small>{step.text}</small>
+              </div>
+            </li>
+          ))}
+        </ol>
       </div>
     </div>
   );
@@ -151,11 +180,11 @@ export function FullscreenLoader({ stage }: { stage: WorkflowStage }) {
 export function PromptExamples({ onPick }: { onPick: (value: string) => void }) {
   return (
     <div className="examples" aria-label="Примеры запросов">
-      <span className="examples-title">Попробуйте:</span>
       {examples.map((example) => (
         <button key={example.prompt} type="button" onClick={() => onPick(example.prompt)}>
           <span>{example.title}</span>
           <small>{example.meta}</small>
+          <b aria-hidden="true">›</b>
         </button>
       ))}
     </div>
@@ -174,12 +203,12 @@ export function ChatComposer({ value, onChange, onSubmit, busy }: { value: strin
     }
   };
   return (
-    <form className="composer" onSubmit={handleSubmit}>
+    <form className="composer liquid-glass" onSubmit={handleSubmit}>
       <label htmlFor="basket-request">Что собрать?</label>
-      <textarea id="basket-request" value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Ужины на 3 дня для двоих, до 3000 ₽, без грибов" rows={3} />
+      <textarea id="basket-request" value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Например: ужины на 3 дня для двоих, до 3000 ₽, без грибов" rows={3} />
       <button type="submit" disabled={busy || !value.trim()} aria-label="Собрать корзину">
         {busy ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-        <span>{busy ? "Собираем..." : "Собрать корзину"}</span>
+        <span>{busy ? "Собираем..." : "Собрать"}</span>
       </button>
     </form>
   );
@@ -187,77 +216,25 @@ export function ChatComposer({ value, onChange, onSubmit, busy }: { value: strin
 
 export function BasketResults({ planner }: { planner: Planner }) {
   const [openedId, setOpenedId] = useState<string | null>(null);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [dragOffset, setDragOffset] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const swipeStart = useRef<{ x: number; y: number } | null>(null);
-  const didSwipe = useRef(false);
   const selected = planner.state.variants.find((variant) => variant.id === openedId) ?? null;
-  const activeVariant = planner.state.variants[activeIndex] ?? planner.state.variants[0] ?? null;
-  const activeId = activeVariant?.id ?? null;
+  const balancedTotal = planner.state.variants.find((variant) => variant.strategy === "balanced")?.totalRub ?? planner.state.variants[0]?.totalRub ?? null;
   const openVariant = (id: string) => {
     planner.selectVariant(id);
     setOpenedId(id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
-  const moveDeck = (step: number) => {
-    if (!planner.state.variants.length) return;
-    setActiveIndex((index) => (index + step + planner.state.variants.length) % planner.state.variants.length);
-  };
-  const handleDeckPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest("button, a, input, textarea")) return;
-    swipeStart.current = { x: event.clientX, y: event.clientY };
-    didSwipe.current = false;
-    setDragging(true);
-    setDragOffset(0);
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const handleDeckPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const start = swipeStart.current;
-    if (!start) return;
-    const dx = event.clientX - start.x;
-    const dy = event.clientY - start.y;
-    if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy)) return;
-    setDragOffset(Math.max(-72, Math.min(72, dx)));
-  };
-  const handleDeckPointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    const start = swipeStart.current;
-    swipeStart.current = null;
-    setDragging(false);
-    setDragOffset(0);
-    if (!start) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    const dx = event.clientX - start.x;
-    const dy = event.clientY - start.y;
-    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
-    didSwipe.current = true;
-    moveDeck(dx < 0 ? 1 : -1);
-  };
-  const handleDeckClickCapture = (event: MouseEvent<HTMLDivElement>) => {
-    if (!didSwipe.current) return;
-    event.preventDefault();
-    event.stopPropagation();
-    didSwipe.current = false;
-  };
-  const deckPosition = (index: number) => {
-    const count = planner.state.variants.length;
-    const offset = index - activeIndex;
-    if (offset > count / 2) return offset - count;
-    if (offset < -count / 2) return offset + count;
-    return offset;
-  };
-  const deckStyle = {
-    "--deck-drag": `${dragOffset}px`,
-    "--deck-drag-side": `${dragOffset * 0.22}px`,
-    "--deck-drag-rotate": `${dragOffset * -0.045}deg`,
-  } as CSSProperties;
+
   if (selected) {
     return (
       <section className="results-panel basket-step" aria-label="Состав выбранной корзины" data-od-id="results-panel">
-        <button className="link-button step-back" type="button" onClick={() => setOpenedId(null)}>
-          <ChevronLeft size={17} /> К вариантам
-        </button>
+        <div className="basket-step-header">
+          <button className="link-button step-back liquid-glass" type="button" onClick={() => {
+            setOpenedId(null);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}>
+            <ChevronLeft size={17} /> К вариантам
+          </button>
+        </div>
         <SelectedBasketActions
           variant={selected}
           mode={planner.state.catalogMode}
@@ -271,43 +248,23 @@ export function BasketResults({ planner }: { planner: Planner }) {
 
   return (
     <section className="results-panel" aria-label="Варианты корзины" data-od-id="results-panel">
-      {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
       <div className="section-heading compact-heading">
         <div>
           <p className="section-kicker">Подборка</p>
           <h2>3 сценария корзины</h2>
         </div>
       </div>
-      <div
-        className={`deck-stage ${dragging ? "dragging" : ""}`}
-        style={deckStyle}
-        data-od-id="variant-grid"
-        onPointerDown={handleDeckPointerDown}
-        onPointerMove={handleDeckPointerMove}
-        onPointerUp={handleDeckPointerUp}
-        onPointerCancel={() => {
-          swipeStart.current = null;
-          setDragging(false);
-          setDragOffset(0);
-        }}
-        onClickCapture={handleDeckClickCapture}
-      >
-        <button className="deck-nav prev" type="button" onClick={() => moveDeck(-1)} aria-label="Предыдущий вариант"><ChevronLeft size={20} /></button>
-        {planner.state.variants.map((variant, index) => (
+      {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
+      <div className="variant-list" data-od-id="variant-grid">
+        {planner.state.variants.map((variant) => (
           <BasketVariantCard
             key={variant.id}
             variant={variant}
-            active={variant.id === activeId}
-            selected={variant.id === openedId}
-            position={deckPosition(index)}
-            onFocus={() => setActiveIndex(index)}
+            recommended={variant.strategy === "balanced"}
+            balancedTotal={balancedTotal}
             onSelect={() => openVariant(variant.id)}
           />
         ))}
-        <button className="deck-nav next" type="button" onClick={() => moveDeck(1)} aria-label="Следующий вариант"><ChevronRight size={20} /></button>
-      </div>
-      <div className="deck-dots" aria-hidden="true">
-        {planner.state.variants.map((variant) => <span key={variant.id} className={variant.id === activeId ? "active" : ""} />)}
       </div>
     </section>
   );
@@ -322,56 +279,55 @@ export function BasketResultsSkeleton({ stage }: { stage: WorkflowStage }) {
           <h2>{stageLabels[stage] ?? "Собираем варианты"}</h2>
         </div>
       </div>
-      <div className="variant-grid skeleton-grid" aria-hidden="true">
+      <div className="variant-list skeleton-list" aria-hidden="true">
         {[0, 1, 2].map((item) => (
           <article className="variant-card skeleton-card" key={item}>
-            <div className="skeleton-hero" />
             <div className="skeleton-line title" />
             <div className="skeleton-line short" />
             <div className="skeleton-line price-line" />
             <div className="skeleton-line" />
             <div className="skeleton-line medium" />
-            <div className="skeleton-button" />
+            <div className="skeleton-line" />
           </article>
         ))}
       </div>
-      <div className="deck-dots" aria-hidden="true"><span className="active" /><span /><span /></div>
     </section>
   );
 }
 
-export function BasketVariantCard({ variant, active, selected, position, onFocus, onSelect }: { variant: BasketVariant; active: boolean; selected: boolean; position: number; onFocus: () => void; onSelect: () => void }) {
-  const visibleItems = variant.items.slice(0, 2);
-  const normalizedPosition = Math.max(-1, Math.min(1, position));
-  const handleCardClick = (event: MouseEvent<HTMLElement>) => {
-    if ((event.target as HTMLElement).closest("button, a, input, textarea")) return;
-    if (active) {
-      onSelect();
-      return;
-    }
-    onFocus();
-  };
+export function BasketVariantCard({ variant, recommended, balancedTotal, onSelect }: { variant: BasketVariant; recommended: boolean; balancedTotal: number | null; onSelect: () => void }) {
+  const visibleItems = variant.items.slice(0, 3);
+  const priceDelta = balancedTotal === null || variant.strategy === "balanced" ? null : variant.totalRub - balancedTotal;
+  const tradeoff = variant.tradeoffs[0] ?? variant.summary;
+  const priceTone = priceDelta === null ? "Компромисс" : priceDelta < 0 ? `На ${Math.abs(priceDelta).toLocaleString("ru-RU")} ₽ дешевле` : `На ${priceDelta.toLocaleString("ru-RU")} ₽ дороже`;
+
   return (
-    <article
-      className={`variant-card ${active ? "active" : ""} ${selected ? "selected" : ""}`}
-      data-position={normalizedPosition}
-      data-od-id={`variant-card-${variant.id}`}
-      onClick={handleCardClick}
-    >
-      <div className="variant-heading">
-        <div>
-          <h2>{variant.title}</h2>
-          <span>{variant.strategy === "balanced" ? "Компромисс" : variant.strategy === "budget" ? "Минимум стоимости" : "Меньше готовки"}</span>
+    <article className="variant-card" data-od-id={`variant-card-${variant.id}`}>
+      <button className="variant-card-button" type="button" onClick={onSelect} aria-label={`Открыть вариант ${variant.title}`}>
+        <div className="variant-card-top">
+          <div>
+            <h2>{strategyLabels[variant.strategy] ?? variant.title}</h2>
+            <span>{strategyMeta[variant.strategy] ?? variant.title}</span>
+          </div>
+          {recommended && <strong className="recommend-badge">Рекомендуем</strong>}
         </div>
-        {selected && <span className="selected-label"><Check size={15} /> Выбрано</span>}
-      </div>
-      <strong className="price">{variant.totalRub.toLocaleString("ru-RU")} ₽</strong>
-      <p>{variant.summary}</p>
-      <small>{variant.uniqueItemsCount} позиций</small>
-      <ul className="item-preview">
-        {visibleItems.map((item) => <li key={item.xmlId}><span>{item.name}</span><b>{item.quantity} шт.</b></li>)}
-      </ul>
-      {variant.warnings.map((warning) => <p className="warning-line" key={warning}><AlertTriangle size={15} /> {warning}</p>)}
+        <strong className="price">{variant.totalRub.toLocaleString("ru-RU")} ₽</strong>
+        <p className="variant-summary">{variant.summary}</p>
+        <dl className="variant-metrics">
+          <div>
+            <dt>Позиций</dt>
+            <dd>{variant.uniqueItemsCount}</dd>
+          </div>
+          <div>
+            <dt>Сравнение</dt>
+            <dd>{priceTone}</dd>
+          </div>
+        </dl>
+        <ul className="item-preview">
+          {visibleItems.map((item) => <li key={item.xmlId}><span>{item.name}</span><b>{item.quantity} шт.</b></li>)}
+        </ul>
+        <p className="tradeoff-line">{tradeoff}</p>
+      </button>
     </article>
   );
 }
@@ -379,19 +335,33 @@ export function BasketVariantCard({ variant, active, selected, position, onFocus
 export function BasketItemRow({ item, onQuantity, onDelete }: { item: BasketItem; onQuantity: (quantity: number) => void; onDelete: () => void }) {
   return (
     <div className="basket-row">
-      <div>
+      <ProductThumb item={item} />
+      <div className="basket-row-copy">
         <strong>{item.name}</strong>
-        <span>{item.role} · {item.reason}</span>
-        {item.weightLabel && <small>{item.weightLabel}</small>}
+        <span>{item.weightLabel ?? roleLabels[item.role] ?? "Продукт"}</span>
       </div>
-      <div className="quantity">
-        <button type="button" onClick={() => onQuantity(item.quantity - 1)} disabled={item.quantity <= 1} aria-label="Уменьшить"><Minus size={15} /></button>
-        <b>{item.quantity}</b>
-        <button type="button" onClick={() => onQuantity(item.quantity + 1)} disabled={item.quantity >= 9} aria-label="Увеличить"><Plus size={15} /></button>
+      <div className="basket-row-actions">
+        <div className="quantity" aria-label="Количество">
+          <button type="button" onClick={() => onQuantity(item.quantity - 1)} disabled={item.quantity <= 1} aria-label="Уменьшить"><Minus size={16} /></button>
+          <b>{item.quantity}</b>
+          <button type="button" onClick={() => onQuantity(item.quantity + 1)} disabled={item.quantity >= 9} aria-label="Увеличить"><Plus size={16} /></button>
+        </div>
+        <button type="button" className="icon-button" onClick={onDelete} aria-label="Удалить"><Trash2 size={17} /></button>
       </div>
-      <b>{Math.round(item.priceRub * item.quantity).toLocaleString("ru-RU")} ₽</b>
-      <button type="button" className="icon-button" onClick={onDelete} aria-label="Удалить"><Trash2 size={16} /></button>
+      <b className="row-price">{Math.round(item.priceRub * item.quantity).toLocaleString("ru-RU")} ₽</b>
     </div>
+  );
+}
+
+function ProductThumb({ item }: { item: BasketItem }) {
+  if (item.imageUrl) {
+    return <img className="product-thumb" src={item.imageUrl} alt="" loading="lazy" />;
+  }
+
+  return (
+    <span className="product-thumb placeholder" aria-hidden="true">
+      {item.name.trim().slice(0, 1).toUpperCase()}
+    </span>
   );
 }
 
@@ -403,27 +373,52 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
   const remove = (xmlId: string) => onItems(variant.items.filter((item) => item.xmlId !== xmlId));
 
   return (
-    <section className="selected-basket" data-od-id="selected-basket">
-      <div className="section-heading">
-        <div>
-          <h2>Состав выбранной корзины: {variant.title}</h2>
-          <p>{variant.totalRub.toLocaleString("ru-RU")} ₽ · {variant.uniqueItemsCount} позиций</p>
+    <>
+      <section className="selected-basket" data-od-id="selected-basket">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Выбранная корзина</p>
+            <h2>{variant.title}</h2>
+            <p>{variant.totalRub.toLocaleString("ru-RU")} ₽ · {variant.uniqueItemsCount} позиций</p>
+          </div>
+          <button className="secondary-button" type="button" onClick={copy}><Copy size={17} /> Скопировать</button>
         </div>
-        <button className="secondary-button" type="button" onClick={copy}><Copy size={17} /> Скопировать список</button>
-      </div>
-      <div className="rows">
-        {variant.items.map((item) => <BasketItemRow key={item.xmlId} item={item} onQuantity={(quantity) => update(item.xmlId, quantity)} onDelete={() => remove(item.xmlId)} />)}
+        <div className="rows">
+          {variant.items.map((item) => <BasketItemRow key={item.xmlId} item={item} onQuantity={(quantity) => update(item.xmlId, quantity)} onDelete={() => remove(item.xmlId)} />)}
+        </div>
+        {mode === "demo" && <p className="demo-note">Каталог временно недоступен. Сумма рассчитана по тестовым данным.</p>}
+      </section>
+      <CheckoutBar
+        totalRub={variant.totalRub}
+        itemCount={variant.uniqueItemsCount}
+        mode={mode}
+        creating={creating}
+        cartUrl={cartUrl}
+        onCreateCart={async () => setCartUrl(await onCreateCart())}
+      />
+    </>
+  );
+}
+
+function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, onCreateCart }: { totalRub: number; itemCount: number; mode: "live" | "demo" | "connecting"; creating: boolean; cartUrl: string | null; onCreateCart: () => Promise<void> }) {
+  const label = `${totalRub.toLocaleString("ru-RU")} ₽`;
+
+  return (
+    <div className="checkout-bar liquid-glass">
+      <div>
+        <strong>{label}</strong>
+        <span>{itemCount} позиций</span>
       </div>
       {mode === "demo" ? (
-        <p className="demo-note">MCP недоступен из браузера, поэтому сейчас используется демонстрационный каталог. Сумма рассчитана по демонстрационным данным.</p>
+        <button className="primary-button checkout-button" type="button" disabled>Каталог недоступен</button>
       ) : cartUrl ? (
-        <a className="primary-button full" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> Открыть корзину во ВкусВилле</a>
+        <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> Открыть</a>
       ) : (
-        <button className="primary-button full" type="button" disabled={creating} onClick={async () => setCartUrl(await onCreateCart())}>
-          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} Создать ссылку на корзину
+        <button className="primary-button checkout-button" type="button" disabled={creating} onClick={onCreateCart}>
+          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} Создать ссылку
         </button>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -441,8 +436,8 @@ export function DemoModeBanner({ onReconnect }: { onReconnect: () => void }) {
   return (
     <div className="demo-banner">
       <AlertTriangle size={18} />
-      <span>MCP недоступен из браузера, поэтому сейчас используется демонстрационный каталог.</span>
-      <button type="button" onClick={onReconnect}>Повторить подключение</button>
+      <span>Каталог временно недоступен. Ниже показан тестовый пример.</span>
+      <button type="button" onClick={onReconnect}>Повторить</button>
     </div>
   );
 }

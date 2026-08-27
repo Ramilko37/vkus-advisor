@@ -83,7 +83,7 @@ export const basketDraftJsonSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["strategy", "title", "summary", "tradeoffs", "items"],
+        required: ["strategy", "items"],
         properties: {
           strategy: { type: "string", enum: ["balanced", "budget", "speed"] },
           items: {

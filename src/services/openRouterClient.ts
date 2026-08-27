@@ -29,7 +29,8 @@ export class BrowserOpenRouterClient {
     signal?: AbortSignal;
   }): Promise<StructuredGenerationResult<T>> {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 45_000);
+    const timeoutMs = options.stage === "basket" ? 75_000 : 45_000;
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
 
     try {
@@ -65,6 +66,7 @@ export class BrowserOpenRouterClient {
         durationMs: payload.durationMs,
         retryCount: payload.retryCount,
         fallbackModelUsed: payload.fallbackModelUsed,
+        repairRequired: payload.repairRequired,
       };
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") throw new OpenRouterError("timeout", "Модель не успела сформировать ответ. Можно повторить запрос.");
