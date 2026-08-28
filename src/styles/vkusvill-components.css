@@ -47,8 +47,7 @@ body {
 }
 
 .vv-copy,
-.variant-summary,
-.tradeoff-line,
+.variant-difference,
 .basket-row-copy span {
   color: var(--vv-text-secondary);
 }
@@ -82,23 +81,18 @@ body {
 }
 
 .vv-basket-variant-card .variant-card-button {
-  gap: 14px;
-  padding: 20px;
+  gap: 10px;
+  padding: 16px;
 }
 
 .vv-basket-variant-card .variant-card-top {
-  align-items: start;
+  align-items: center;
 }
 
 .vv-basket-variant-card h2 {
-  font-size: clamp(21px, 5.6vw, 28px);
-  line-height: 1.08;
+  font-size: clamp(20px, 5.2vw, 25px);
+  line-height: 1.1;
   hyphens: none;
-}
-
-.vv-basket-variant-card .variant-card-top span {
-  color: var(--accent-hover);
-  font-weight: 650;
 }
 
 .vv-basket-variant-card .recommend-badge {
@@ -108,74 +102,37 @@ body {
 }
 
 .vv-basket-variant-card .price {
-  margin-top: 2px;
-  font-size: clamp(38px, 10vw, 50px);
+  margin-top: 0;
+  font-size: clamp(34px, 9vw, 46px);
   letter-spacing: 0;
 }
 
-.vv-basket-variant-card .variant-summary {
-  max-width: 28ch;
-  margin-top: -4px;
+.vv-basket-variant-card .variant-difference {
+  max-width: 34ch;
   font-size: 16px;
-  line-height: 1.38;
+  line-height: 1.32;
 }
 
-.vv-basket-variant-card .variant-metrics {
-  gap: 8px;
-}
-
-.vv-basket-variant-card .variant-metrics div {
+.vv-basket-variant-card .variant-compare-line span {
   border: 1px solid color-mix(in srgb, var(--vv-control) 72%, transparent);
-  border-radius: 10px;
-  padding: 9px 11px;
   background: color-mix(in srgb, var(--accent) 5%, white);
 }
 
-.vv-basket-variant-card .variant-metrics dd {
-  font-size: 15px;
-  line-height: 1.22;
-}
-
-.vv-basket-variant-card .variant-metrics div:last-child dd {
+.vv-basket-variant-card .variant-compare-line span:last-child {
   color: var(--accent-hover);
 }
 
-.vv-basket-variant-card .item-preview {
-  gap: 8px;
-  border-radius: 12px;
-  padding: 10px 11px;
-  background: color-mix(in srgb, var(--vv-surface-soft) 86%, white);
-}
-
-.vv-basket-variant-card .item-preview li {
-  grid-template-columns: minmax(0, 1fr) minmax(42px, auto);
-  gap: 12px;
-  align-items: start;
-  font-size: 15px;
-}
-
-.vv-basket-variant-card .item-preview b {
-  justify-self: end;
-  color: var(--text-primary);
-}
-
-.vv-basket-variant-card .tradeoff-line {
+.vv-basket-variant-card .variant-difference {
   border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
   border-radius: 12px;
-  padding: 11px 12px;
+  padding: 10px 12px;
   background: color-mix(in srgb, var(--accent) 7%, white);
   color: var(--vv-text-secondary);
-  line-height: 1.35;
 }
 
 @media (max-width: 520px) {
-  .vv-basket-variant-card .variant-card-top {
-    display: grid;
-    gap: 8px;
-  }
-
   .vv-basket-variant-card .recommend-badge {
-    justify-self: start;
+    padding-inline: 10px;
   }
 }
 
@@ -187,7 +144,6 @@ body {
     0 18px 46px rgba(23, 32, 25, 0.12);
 }
 
-.catalog-status.connecting::before,
 .demo-banner::before,
 .error-notice::before {
   content: "";
@@ -199,14 +155,13 @@ body {
   margin-top: 4px;
 }
 
-.catalog-status.connecting svg,
 .demo-banner svg,
 .error-notice svg {
   flex: 0 0 auto;
 }
 
 .primary-button,
-.composer button,
+.composer-input-shell > button,
 .checkout-button {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 42%),

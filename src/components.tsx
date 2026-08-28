@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, Minus, Plus, RefreshCw, Send, ShoppingBasket, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, Minus, Plus, RefreshCw, ShoppingBasket, Trash2 } from "lucide-react";
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { BasketItem, BasketPriority, BasketVariant, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
@@ -9,6 +9,20 @@ const examples = [
   { title: "Ужины на 3 дня", meta: "2 человека · до 3000 ₽ · без грибов", prompt: "Ужины на 3 дня для двоих до 3000 ₽, без грибов" },
   { title: "Белковая корзина", meta: "Рабочая неделя · для одного", prompt: "Белковая корзина на рабочую неделю для одного человека" },
   { title: "Почти без готовки", meta: "На 4 дня · быстрые блюда", prompt: "Максимально простая еда на 4 дня, почти без готовки" },
+];
+
+const briefChips = [
+  { label: "3 дня", fragment: "на 3 дня" },
+  { label: "для двоих", fragment: "для двоих" },
+  { label: "до 3000 ₽", fragment: "до 3000 ₽" },
+  { label: "без грибов", fragment: "без грибов" },
+  { label: "быстро", fragment: "почти без готовки" },
+];
+
+const scenarioOnboarding = [
+  { title: "Баланс", text: "цена + время" },
+  { title: "Экономия", text: "дешевле" },
+  { title: "Быстрее", text: "меньше готовки" },
 ];
 
 const stageLabels: Record<WorkflowStage, string> = {
@@ -26,12 +40,6 @@ const strategyLabels: Record<BasketPriority, string> = {
   balanced: "Сбалансированная",
   budget: "Экономная",
   speed: "Самая простая",
-};
-
-const strategyMeta: Record<BasketPriority, string> = {
-  balanced: "Компромисс цены и удобства",
-  budget: "Минимум стоимости",
-  speed: "Меньше готовки",
 };
 
 const roleLabels: Record<string, string> = {
@@ -96,16 +104,7 @@ export function ConversationPanel({ planner }: { planner: Planner }) {
 }
 
 export function CatalogStatus({ mode, onReconnect }: { mode: "live" | "demo" | "connecting"; onReconnect: () => void }) {
-  if (mode === "live") return null;
-
-  if (mode === "connecting") {
-    return (
-      <div className="catalog-status connecting" aria-live="polite">
-        <Loader2 className="spin" size={17} />
-        <span>Подключаем каталог...</span>
-      </div>
-    );
-  }
+  if (mode !== "demo") return null;
 
   return (
     <div className="catalog-status demo" aria-live="polite">
@@ -183,12 +182,11 @@ export function FullscreenLoader({ stage }: { stage: WorkflowStage }) {
 
 export function PromptExamples({ onPick }: { onPick: (value: string) => void }) {
   return (
-    <div className="examples" aria-label="Примеры запросов">
+    <div className="examples" aria-label="Готовые запросы">
       {examples.map((example) => (
         <button key={example.prompt} type="button" onClick={() => onPick(example.prompt)}>
           <span>{example.title}</span>
           <small>{example.meta}</small>
-          <b aria-hidden="true">›</b>
         </button>
       ))}
     </div>
@@ -196,32 +194,75 @@ export function PromptExamples({ onPick }: { onPick: (value: string) => void }) 
 }
 
 export function ChatComposer({ value, onChange, onSubmit, busy }: { value: string; onChange: (value: string) => void; onSubmit: () => void; busy: boolean }) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hasText = value.trim().length > 0;
+  const canSubmit = hasText && !busy;
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
+    if (!canSubmit) return;
     onSubmit();
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && canSubmit) {
       event.preventDefault();
       onSubmit();
     }
   };
+  const addBriefChip = (fragment: string) => {
+    onChange(appendBriefFragment(value, fragment));
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   return (
     <form className="composer vv-chat-composer liquid-glass" onSubmit={handleSubmit}>
-      <label htmlFor="basket-request">Что собрать?</label>
-      <textarea id="basket-request" value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Например: ужины на 3 дня для двоих, до 3000 ₽, без грибов" rows={3} />
-      <button type="submit" disabled={busy || !value.trim()} aria-label="Собрать корзину">
-        {busy ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-        <span>{busy ? "Собираем..." : "Собрать"}</span>
-      </button>
+      <div className="composer-head">
+        <label htmlFor="basket-request">Что собрать?</label>
+        <p id="basket-request-hint">Добавьте срок, людей, бюджет или ограничения.</p>
+      </div>
+      <ul className="scenario-onboarding" aria-label="После запроса покажем три сценария корзины">
+        {scenarioOnboarding.map((item) => (
+          <li key={item.title}>
+            <strong>{item.title}</strong>
+            <span>{item.text}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="brief-chips" aria-label="Быстро добавить параметры">
+        {briefChips.map((chip) => (
+          <button key={chip.fragment} type="button" onClick={() => addBriefChip(chip.fragment)}>
+            {chip.label}
+          </button>
+        ))}
+      </div>
+      <div className="composer-input-shell">
+        <textarea
+          id="basket-request"
+          ref={textareaRef}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Например: ужины для двоих, без грибов"
+          rows={3}
+          aria-describedby="basket-request-hint"
+        />
+        <button type="submit" disabled={busy || !hasText} aria-label={hasText ? "Собрать корзину" : "Опишите задачу"} aria-keyshortcuts="Control+Enter Meta+Enter">
+          {busy ? <Loader2 className="spin" size={18} /> : <ShoppingBasket size={18} />}
+          <span>{busy ? "Собираем..." : hasText ? "Собрать" : "Опишите задачу"}</span>
+        </button>
+      </div>
     </form>
   );
 }
 
+function appendBriefFragment(value: string, fragment: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return fragment;
+  if (trimmed.toLocaleLowerCase("ru-RU").includes(fragment.toLocaleLowerCase("ru-RU"))) return value;
+  return `${trimmed}, ${fragment}`;
+}
+
 export function BasketResults({ planner }: { planner: Planner }) {
   const [openedId, setOpenedId] = useState<string | null>(planner.state.selectedId);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const swipeStartX = useRef<number | null>(null);
   const variants = planner.state.variants;
   const selected = planner.state.variants.find((variant) => variant.id === openedId) ?? null;
   const balancedTotal = planner.state.variants.find((variant) => variant.strategy === "balanced")?.totalRub ?? planner.state.variants[0]?.totalRub ?? null;
@@ -230,18 +271,6 @@ export function BasketResults({ planner }: { planner: Planner }) {
     setOpenedId(id);
     scrollToTop();
   };
-  const setSafeIndex = (index: number) => setActiveIndex((index + variants.length) % variants.length);
-  const moveActive = (step: number) => setActiveIndex((index) => (index + step + variants.length) % variants.length);
-  const positionFor = (index: number) => {
-    if (index === activeIndex) return "active";
-    if (index === (activeIndex + 1) % variants.length) return "next";
-    if (index === (activeIndex - 1 + variants.length) % variants.length) return "prev";
-    return "hidden";
-  };
-
-  useEffect(() => {
-    if (activeIndex >= variants.length) setActiveIndex(0);
-  }, [activeIndex, variants.length]);
 
   useEffect(() => {
     if (planner.state.selectedId && !openedId) setOpenedId(planner.state.selectedId);
@@ -279,43 +308,14 @@ export function BasketResults({ planner }: { planner: Planner }) {
         </div>
       </div>
       {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
-      <div
-        className="variant-list variant-deck"
-        data-od-id="variant-grid"
-        onPointerDown={(event) => {
-          swipeStartX.current = event.clientX;
-        }}
-        onPointerUp={(event) => {
-          if (swipeStartX.current === null) return;
-          const delta = event.clientX - swipeStartX.current;
-          swipeStartX.current = null;
-          if (Math.abs(delta) > 44) moveActive(delta < 0 ? 1 : -1);
-        }}
-      >
-        {variants.map((variant, index) => {
-          const active = index === activeIndex;
-          return (
+      <div className="variant-list compare-list" data-od-id="variant-grid">
+        {variants.map((variant) => (
           <BasketVariantCard
             key={variant.id}
             variant={variant}
-            active={active}
-            position={positionFor(index)}
             recommended={variant.strategy === "balanced"}
             balancedTotal={balancedTotal}
-            onSelect={() => active ? openVariant(variant.id) : setSafeIndex(index)}
-          />
-          );
-        })}
-      </div>
-      <div className="deck-dots" aria-label="Переключить сценарий корзины">
-        {variants.map((variant, index) => (
-          <button
-            key={variant.id}
-            type="button"
-            className={index === activeIndex ? "active" : ""}
-            onClick={() => setSafeIndex(index)}
-            aria-label={`Показать вариант ${strategyLabels[variant.strategy] ?? variant.title}`}
-            aria-current={index === activeIndex}
+            onSelect={() => openVariant(variant.id)}
           />
         ))}
       </div>
@@ -361,59 +361,37 @@ export function BasketResultsSkeleton({ stage }: { stage: WorkflowStage }) {
   );
 }
 
-export function BasketVariantCard({ variant, active, position, recommended, balancedTotal, onSelect }: { variant: BasketVariant; active: boolean; position?: "active" | "prev" | "next" | "hidden"; recommended: boolean; balancedTotal: number | null; onSelect: () => void }) {
-  const visibleItems = variant.items.slice(0, 3);
+export function BasketVariantCard({ variant, recommended, balancedTotal, onSelect }: { variant: BasketVariant; recommended: boolean; balancedTotal: number | null; onSelect: () => void }) {
   const priceDelta = balancedTotal === null || variant.strategy === "balanced" ? null : variant.totalRub - balancedTotal;
-  const tradeoff = formatTradeoff(variant.tradeoffs[0], variant.strategy);
-  const priceTone = priceDelta === null ? "Компромисс" : priceDelta < 0 ? `На ${Math.abs(priceDelta).toLocaleString("ru-RU")} ₽ дешевле` : `На ${priceDelta.toLocaleString("ru-RU")} ₽ дороже`;
-  const usefulSummary = strategySummaries[variant.strategy] ?? variant.summary;
+  const priceTone = priceDelta === null ? "Базовый вариант" : priceDelta < 0 ? `−${Math.abs(priceDelta).toLocaleString("ru-RU")} ₽ к балансу` : `+${priceDelta.toLocaleString("ru-RU")} ₽ к балансу`;
+  const difference = strategyDifferences[variant.strategy] ?? variant.summary;
 
   return (
-    <article className={`variant-card vv-basket-variant-card ${active ? "active" : ""}`} data-position={position} data-od-id={`variant-card-${variant.id}`}>
-      <button className="variant-card-button" type="button" onClick={onSelect} aria-label={active ? `Открыть корзину ${variant.title}` : `Показать вариант ${variant.title}`}>
+    <article className="variant-card vv-basket-variant-card" data-od-id={`variant-card-${variant.id}`}>
+      <button className="variant-card-button" type="button" onClick={onSelect} aria-label={`Открыть корзину ${variant.title}`}>
         <div className="variant-card-top">
           <div>
             <h2>{strategyLabels[variant.strategy] ?? variant.title}</h2>
-            <span>{strategyMeta[variant.strategy] ?? variant.title}</span>
           </div>
           {recommended && <strong className="recommend-badge">Рекомендуем</strong>}
         </div>
         <strong className="price">{variant.totalRub.toLocaleString("ru-RU")} ₽</strong>
-        <p className="variant-summary">{usefulSummary}</p>
-        <dl className="variant-metrics">
-          <div>
-            <dt>В корзине</dt>
-            <dd>{variant.uniqueItemsCount}</dd>
-          </div>
-          <div>
-            <dt>По цене</dt>
-            <dd>{priceTone}</dd>
-          </div>
-        </dl>
-        <ul className="item-preview">
-          {visibleItems.map((item) => <li key={item.xmlId}><span>{item.name}</span><b>{item.quantity} шт.</b></li>)}
-        </ul>
-        <p className="tradeoff-line">{tradeoff}</p>
-        <span className="variant-card-action">{active ? "Открыть корзину" : "Посмотреть вариант"}</span>
+        <div className="variant-compare-line">
+          <span>{variant.uniqueItemsCount} позиций</span>
+          <span>{priceTone}</span>
+        </div>
+        <p className="variant-difference">{difference}</p>
+        <span className="variant-card-action">Открыть</span>
       </button>
     </article>
   );
 }
 
-const strategySummaries: Record<BasketPriority, string> = {
-  balanced: "Подходит, если важны цена и простая готовка.",
-  budget: "Подходит, если нужно уложиться в минимум стоимости.",
-  speed: "Подходит, если важны быстрые блюда без лишней подготовки.",
+const strategyDifferences: Record<BasketPriority, string> = {
+  balanced: "Цена и готовка в балансе.",
+  budget: "Дешевле, но больше готовки.",
+  speed: "Дороже, зато быстрее.",
 };
-
-function formatTradeoff(tradeoff: string | undefined, strategy: BasketPriority) {
-  if (!tradeoff || /не самый деш[её]в/i.test(tradeoff)) {
-    if (strategy === "budget") return "Самый бережный вариант, но выбор блюд проще.";
-    if (strategy === "speed") return "Не самый дешёвый, зато меньше времени на готовку.";
-    return "Не самый дешёвый, зато меньше компромиссов по блюдам.";
-  }
-  return tradeoff;
-}
 
 export function BasketItemRow({ item, onQuantity, onDelete }: { item: BasketItem; onQuantity: (quantity: number) => void; onDelete: () => void }) {
   return (
