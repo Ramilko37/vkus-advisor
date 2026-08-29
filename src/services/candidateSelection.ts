@@ -2,6 +2,7 @@ import type { BasketIntent, NormalizedProduct } from "../types/domain";
 
 export interface LlmCandidateProduct {
   xmlId: string;
+  retailer?: NormalizedProduct["retailer"];
   name: string;
   priceRub: number;
   purpose: string;
@@ -46,6 +47,7 @@ export function toLlmCandidate(product: NormalizedProduct, intent: BasketIntent)
 
   return {
     xmlId: product.xmlId,
+    ...(product.retailer ? { retailer: product.retailer } : {}),
     name: product.name.trim().slice(0, 100),
     priceRub: Math.round(product.priceRub),
     purpose: product.sourceQuery.trim().slice(0, 40),

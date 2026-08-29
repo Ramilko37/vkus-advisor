@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppShell, BasketResults, BasketResultsSkeleton, ConversationPanel, EmptyResultsState, FullscreenLoader } from "./components";
+import { useAuthProfile } from "./hooks/useAuthProfile";
 import { useBasketPlanner } from "./hooks/useBasketPlanner";
 import type { WorkflowStage } from "./types/domain";
 
@@ -11,7 +12,8 @@ function currentRoute() {
 }
 
 export function App() {
-  const planner = useBasketPlanner();
+  const authProfile = useAuthProfile();
+  const planner = useBasketPlanner(authProfile.profile);
   const [route, setRoute] = useState<"home" | "results">(currentRoute);
   const hasResults = planner.state.variants.length > 0;
   const loading = loadingStages.includes(planner.state.stage);
@@ -49,7 +51,7 @@ export function App() {
 
   return (
     <>
-      <AppShell route={route}>
+      <AppShell route={route} authProfile={authProfile}>
         {route === "results" ? (
           hasResults ? (
             <BasketResults planner={planner} />
@@ -62,7 +64,7 @@ export function App() {
           <ConversationPanel planner={planner} />
         )}
       </AppShell>
-      {loading && <FullscreenLoader stage={planner.state.stage} />}
+      {loading && <FullscreenLoader stage={planner.state.stage} intent={planner.state.intent} onCancel={planner.cancel} />}
     </>
   );
 }

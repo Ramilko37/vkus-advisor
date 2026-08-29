@@ -40,7 +40,7 @@ export function hydrateAndValidateVariants(
   const requiredStrategies = ["balanced", "budget", "speed"] as const;
   if (drafts.length !== 3 || new Set(drafts.map((draft) => draft.strategy)).size !== 3) return [];
 
-  return requiredStrategies.flatMap((strategy) => {
+  const variants = requiredStrategies.flatMap((strategy) => {
     const draft = drafts.find((item) => item.strategy === strategy);
     if (!draft) return [];
 
@@ -84,6 +84,8 @@ export function hydrateAndValidateVariants(
       warnings: Array.from(new Set(warnings)),
     }];
   });
+
+  return withHonestScenarioCopy(variants);
 }
 
 function buildVariantSummary(strategy: BasketVariant["strategy"], uniqueItemsCount: number, totalRub: number) {
@@ -100,4 +102,24 @@ function buildVariantTradeoffs(strategy: BasketVariant["strategy"], intent: Bask
   if (strategy === "speed") tradeoffs.push("Удобство может повысить стоимость");
   if (intent.budgetRub !== null && totalRub > intent.budgetRub) tradeoffs.push("Превышает заданный бюджет");
   return tradeoffs.slice(0, 2);
+}
+
+function withHonestScenarioCopy(variants: BasketVariant[]) {
+  const balancedTotal = variants.find((variant) => variant.strategy === "balanced")?.totalRub;
+  if (balancedTotal === undefined) return variants;
+
+  return variants.map((variant) => {
+    if (variant.strategy === "balanced") {
+      return { ...variant, title: "Сбалансированная", summary: "Цена и готовка в балансе." };
+    }
+    if (variant.strategy === "budget") {
+      const cheaper = variant.totalRub < balancedTotal;
+      return {
+        ...variant,
+        title: cheaper ? "Экономная" : "Альтернатива",
+        summary: cheaper ? "Дешевле, но готовки может быть больше." : "По цене выше баланса, проверьте состав.",
+      };
+    }
+    return { ...variant, title: "Быстрая", summary: variant.totalRub > balancedTotal ? "Дороже, зато быстрее." : "Быстрее без переплаты." };
+  });
 }

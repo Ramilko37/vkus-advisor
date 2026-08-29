@@ -28,6 +28,10 @@ const intentFallbackModel = process.env.OPENROUTER_INTENT_FALLBACK_MODEL || proc
 const basketFallbackModel = process.env.OPENROUTER_BASKET_FALLBACK_MODEL || process.env.OPENROUTER_FALLBACK_MODEL || "dots-studio/dots-3-note-preview:free";
 const openRouterReferer = process.env.OPENROUTER_HTTP_REFERER || `http://127.0.0.1:${port}`;
 const openRouterTitle = process.env.OPENROUTER_APP_TITLE || "Basket Task Prototype";
+const pyaterochkaMcpUrl = process.env.PYATEROCHKA_MCP_URL || "";
+const pyaterochkaConfiguredStoreId = process.env.PYATEROCHKA_STORE_ID || "";
+const pyaterochkaAddress = process.env.PYATEROCHKA_ADDRESS || "";
+const pyaterochkaMaxSearchResultsPerQuery = Number(process.env.PYATEROCHKA_SEARCH_RESULTS_PER_QUERY || 4);
 const mcpUrls = [
   process.env.VKUSVILL_MCP_URL || "https://mcp.vkusvill.ru/mcp",
   "https://mcp001.vkusvill.ru/mcp",
@@ -37,6 +41,10 @@ const searchCacheTtlMs = 3 * 60 * 1000;
 const detailsCacheTtlMs = 30 * 60 * 1000;
 
 let mcpClient = null;
+let pyaterochkaMcpClient = null;
+let pyaterochkaStoreId = "";
+let pyaterochkaStoreAddress = "";
+let pyaterochkaUnavailableUntil = 0;
 let catalogMode = "demo";
 const searchCache = new Map();
 const detailsCache = new Map();
@@ -59,6 +67,9 @@ export async function handleRequest(req, res) {
       basketModel: effectiveModel(activeModel("basket")),
       openRouterReferer,
       openRouterTitle,
+      pyaterochkaConfigured: Boolean(pyaterochkaMcpUrl),
+      pyaterochkaConnected: Boolean(pyaterochkaMcpClient),
+      pyaterochkaStore: pyaterochkaStoreId ? "resolved" : pyaterochkaConfiguredStoreId ? "configured" : pyaterochkaStoreAddress || pyaterochkaAddress ? "address" : "missing",
       catalogMode,
     });
     if (url.pathname === "/api/llm" && req.method === "POST") return await handleLlm(req, res);
@@ -462,7 +473,9 @@ async function handleCatalogStatus(res) {
 
 async function handleCatalogSearch(req, res) {
   const query = await readJson(req);
-  await ensureMcp();
+  const address = cleanText(stringValue(query.address));
+  await ensureMcp(address);
+  const liveProducts = [];
   if (catalogMode === "live" && mcpClient) {
     try {
       const cacheKey = `${normalizeCacheKey(query.query)}:${query.sort || "popularity"}:1`;
@@ -473,17 +486,50 @@ async function handleCatalogSearch(req, res) {
           .filter(Boolean)
           .slice(0, maxSearchResultsPerQuery);
       });
-      return send(res, 200, { mode: "live", products });
+      liveProducts.push(...products);
     } catch {
-      catalogMode = "demo";
+      mcpClient = null;
+      catalogMode = pyaterochkaMcpClient ? "live" : "demo";
     }
   }
+  if (pyaterochkaMcpClient && pyaterochkaStoreId) {
+    try {
+      const cacheKey = `pyaterochka:${pyaterochkaStoreId}:${normalizeCacheKey(query.query)}:${query.sort || "popularity"}`;
+      const products = await cached(cacheKey, searchCache, inFlightSearches, searchCacheTtlMs, async () => {
+        const payload = await callPyaterochkaMcp("search_products", {
+          store_id: pyaterochkaStoreId,
+          query: query.query,
+          sort: pyaterochkaSort(query.sort),
+          limit: pyaterochkaMaxSearchResultsPerQuery,
+          offset: 0,
+        });
+        return extractProductList(parseMcpResponse(payload))
+          .map((item) => normalizePyaterochkaProduct(item, query.query))
+          .filter(Boolean)
+          .slice(0, pyaterochkaMaxSearchResultsPerQuery);
+      });
+      liveProducts.push(...products);
+    } catch {
+      pyaterochkaMcpClient = null;
+      pyaterochkaUnavailableUntil = Date.now() + 60_000;
+    }
+  }
+  if (liveProducts.length) return send(res, 200, { mode: "live", products: dedupeByXmlId(liveProducts) });
   send(res, 200, { mode: "demo", products: searchDemo(query).slice(0, 5) });
 }
 
 async function handleCatalogDetails(url, res) {
   const id = url.searchParams.get("id") || "";
   await ensureMcp();
+  if (id.startsWith("pyaterochka:") && pyaterochkaMcpClient && pyaterochkaStoreId) {
+    try {
+      const payload = await callPyaterochkaMcp("get_product_info", { store_id: pyaterochkaStoreId, plu: id.replace(/^pyaterochka:/, "") });
+      return send(res, 200, normalizePyaterochkaProduct(parseMcpResponse(payload), "details") || {});
+    } catch {
+      pyaterochkaMcpClient = null;
+      pyaterochkaUnavailableUntil = Date.now() + 60_000;
+    }
+  }
   if (catalogMode === "live" && mcpClient && !id.startsWith("demo-")) {
     try {
       return send(res, 200, await cached(id, detailsCache, inFlightDetails, detailsCacheTtlMs, async () => {
@@ -501,32 +547,76 @@ async function handleCart(req, res) {
   const body = await readJson(req);
   await ensureMcp();
   if (catalogMode !== "live" || !mcpClient) return send(res, 409, { error: "Demo mode cannot create cart links" });
-  const products = (body.items || []).slice(0, 20).map((item) => ({ xml_id: Number(item.xmlId), q: item.quantity }));
+  const items = (body.items || []).slice(0, 20);
+  if (items.some((item) => !/^\d+$/.test(String(item.xmlId)))) {
+    return send(res, 409, { error: "Cart links are available only for VkusVill products. Copy the list for other retailers." });
+  }
+  const products = items.map((item) => ({ xml_id: Number(item.xmlId), q: item.quantity }));
   const payload = await callMcp("vkusvill_cart_link_create", { products });
   const url = extractCartUrl(parseMcpResponse(payload));
   if (!url) return send(res, 502, { error: "Invalid cart URL" });
   send(res, 200, { url });
 }
 
-async function ensureMcp() {
-  if (mcpClient || catalogMode === "live") return;
-  for (const endpoint of mcpUrls) {
-    try {
-      const client = new Client({ name: "basket-task-server", version: "0.1.0" });
-      const transport = new StreamableHTTPClientTransport(new URL(endpoint));
-      await withTimeout(client.connect(transport), 10_000);
-      mcpClient = client;
-      catalogMode = "live";
-      return;
-    } catch {
-      mcpClient = null;
-      catalogMode = "demo";
+async function ensureMcp(address = "") {
+  if (!mcpClient) {
+    for (const endpoint of mcpUrls) {
+      try {
+        const client = new Client({ name: "basket-task-server", version: "0.1.0" });
+        const transport = new StreamableHTTPClientTransport(new URL(endpoint));
+        await withTimeout(client.connect(transport), 10_000);
+        mcpClient = client;
+        catalogMode = "live";
+        break;
+      } catch {
+        mcpClient = null;
+        catalogMode = "demo";
+      }
     }
   }
+  await ensurePyaterochkaMcp(address);
+  catalogMode = mcpClient || pyaterochkaMcpClient ? "live" : "demo";
 }
 
 function callMcp(name, args) {
   return withTimeout(mcpClient.callTool({ name, arguments: args }), 20_000);
+}
+
+async function ensurePyaterochkaMcp(address = "") {
+  const desiredAddress = cleanText(stringValue(address || pyaterochkaAddress));
+  if (!pyaterochkaShouldConnect(desiredAddress) || Date.now() < pyaterochkaUnavailableUntil) return;
+  if (pyaterochkaMcpClient && pyaterochkaStoreId && (pyaterochkaConfiguredStoreId || desiredAddress === pyaterochkaStoreAddress)) return;
+  try {
+    let client = pyaterochkaMcpClient;
+    if (!client) {
+      client = new Client({ name: "basket-task-pyaterochka", version: "0.1.0" });
+      const transport = new StreamableHTTPClientTransport(new URL(pyaterochkaMcpUrl));
+      await withTimeout(client.connect(transport), 10_000);
+    }
+    pyaterochkaMcpClient = client;
+    pyaterochkaStoreId = pyaterochkaConfiguredStoreId || await resolvePyaterochkaStoreId(client, desiredAddress);
+    pyaterochkaStoreAddress = desiredAddress;
+    if (!pyaterochkaStoreId) throw new Error("Pyaterochka store is not resolved");
+  } catch {
+    pyaterochkaMcpClient = null;
+    pyaterochkaStoreId = "";
+    pyaterochkaStoreAddress = "";
+    pyaterochkaUnavailableUntil = Date.now() + 60_000;
+  }
+}
+
+function pyaterochkaShouldConnect(address = "") {
+  return Boolean(pyaterochkaMcpUrl && (pyaterochkaConfiguredStoreId || address || pyaterochkaAddress));
+}
+
+async function resolvePyaterochkaStoreId(client, address) {
+  if (!address) return "";
+  const payload = await withTimeout(client.callTool({ name: "find_store", arguments: { address } }), 20_000);
+  return extractPyaterochkaStoreId(parseMcpResponse(payload));
+}
+
+function callPyaterochkaMcp(name, args) {
+  return withTimeout(pyaterochkaMcpClient.callTool({ name, arguments: args }), 20_000);
 }
 
 async function serveStatic(url, res) {
@@ -669,6 +759,7 @@ function normalizeProduct(raw, sourceQuery, isDemo) {
   return {
     id: stringValue(raw?.id) || xmlId,
     xmlId,
+    retailer: "vkusvill",
     name: cleanText(name),
     priceRub,
     oldPriceRub: numberValue(raw?.oldPriceRub ?? raw?.old_price) || numberValue(raw?.price?.old),
@@ -688,6 +779,35 @@ function normalizeProduct(raw, sourceQuery, isDemo) {
   };
 }
 
+function normalizePyaterochkaProduct(raw, sourceQuery) {
+  const value = raw?.data || raw;
+  const plu = stringValue(value?.plu ?? value?.xml_id ?? value?.xmlId ?? value?.id);
+  const name = stringValue(value?.name ?? value?.title ?? value?.product_name);
+  const priceRub = numberValue(value?.priceRub ?? value?.price ?? value?.current_price ?? value?.cpd_price);
+  if (!plu || !name || !priceRub || priceRub <= 0) return null;
+  return {
+    id: `pyaterochka:${plu}`,
+    xmlId: `pyaterochka:${plu}`,
+    retailer: "pyaterochka",
+    name: cleanText(name),
+    priceRub,
+    oldPriceRub: numberValue(value?.oldPriceRub ?? value?.old_price),
+    rating: numberValue(value?.rating),
+    reviewsCount: numberValue(value?.reviewsCount ?? value?.rating_count),
+    weightLabel: stringValue(value?.size ?? value?.unit ?? value?.weight),
+    imageUrl: imageValue(value),
+    productUrl: stringValue(value?.url ?? value?.productUrl ?? value?.link),
+    description: cleanText(stringValue(value?.description)),
+    composition: cleanText(stringValue(value?.ingredients ?? value?.composition)),
+    calories: numberValue(value?.calories ?? value?.calories_per_100g),
+    proteins: numberValue(value?.proteins ?? value?.protein_per_100g),
+    fats: numberValue(value?.fats ?? value?.fat_per_100g),
+    carbohydrates: numberValue(value?.carbohydrates ?? value?.carbs_per_100g),
+    sourceQuery,
+    isDemo: false,
+  };
+}
+
 function normalizeDetails(raw) {
   const value = raw?.data || raw;
   return normalizeProduct(value, "details", false) || {
@@ -700,6 +820,24 @@ function normalizeDetails(raw) {
     fats: numberValue(value?.fats),
     carbohydrates: numberValue(value?.carbohydrates),
   };
+}
+
+function extractPyaterochkaStoreId(raw) {
+  const store = raw?.store || raw?.data?.store || raw?.stores?.[0] || raw?.data?.stores?.[0] || raw;
+  return stringValue(store?.store_id ?? store?.sap_code ?? store?.id) || "";
+}
+
+function pyaterochkaSort(sort) {
+  return sort === "price_asc" || sort === "price_desc" ? sort : "popularity";
+}
+
+function dedupeByXmlId(products) {
+  const map = new Map();
+  for (const product of products) {
+    const current = map.get(product.xmlId);
+    if (!current || Object.values(product).filter(Boolean).length > Object.values(current).filter(Boolean).length) map.set(product.xmlId, product);
+  }
+  return Array.from(map.values());
 }
 
 function imageValue(raw) {

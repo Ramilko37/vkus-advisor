@@ -1,0 +1,43 @@
+import { describe, expect, it } from "vitest";
+import { replaceBasketItem } from "./basketEditing";
+import type { BasketItem, NormalizedProduct } from "../types/domain";
+
+describe("basket editing", () => {
+  it("replaces an item with an unused product while preserving quantity and role copy", () => {
+    const items = [basketItem("1", "Курица", 2), basketItem("2", "Гречка", 1)];
+    const products = [product("2", "Гречка"), product("3", "Индейка")];
+
+    const result = replaceBasketItem(items, products, "1");
+
+    expect(result.map((item) => [item.xmlId, item.name, item.quantity, item.role])).toEqual([
+      ["3", "Индейка", 2, "Белок"],
+      ["2", "Гречка", 1, "Белок"],
+    ]);
+  });
+
+  it("keeps the basket unchanged when no replacement is available", () => {
+    const items = [basketItem("1", "Курица", 1)];
+
+    expect(replaceBasketItem(items, [product("1", "Курица")], "1")).toBe(items);
+  });
+});
+
+function basketItem(xmlId: string, name: string, quantity: number): BasketItem {
+  return {
+    ...product(xmlId, name),
+    quantity,
+    role: "Белок",
+    reason: "Подходит",
+  };
+}
+
+function product(xmlId: string, name: string): NormalizedProduct {
+  return {
+    id: xmlId,
+    xmlId,
+    name,
+    priceRub: 100,
+    sourceQuery: "белок",
+    isDemo: false,
+  };
+}

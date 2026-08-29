@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, NormalizedProduct, PipelineMetrics, WorkflowStage } from "../types/domain";
+import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, NormalizedProduct, PipelineMetrics, UserProfile, WorkflowStage } from "../types/domain";
 import { analyzeIntent, basketSummary, composeBaskets } from "../services/basketOrchestrator";
 import { BrowserLlmClient, LlmProviderError, getSessionId } from "../services/openRouterClient";
 import { createCatalogClient } from "../services/catalog";
 import { applyFastIntentPatch, buildCatalogFingerprint, normalizeBasketIntent } from "../services/intentUtils";
 import { measureStage } from "../services/pipelineMetrics";
+import { validateBasketRequest } from "../services/requestCopy";
+import { replaceBasketItem } from "../services/basketEditing";
+import { DEFAULT_PROFILE } from "../services/profileRepository";
 
 interface PlannerState {
   stage: WorkflowStage;
@@ -76,7 +79,7 @@ function reducer(state: PlannerState, action: Action): PlannerState {
   }
 }
 
-export function useBasketPlanner() {
+export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
   const [state, dispatch] = useReducer(reducer, undefined, restorePlannerState);
   const catalogRef = useRef<CatalogClient | null>(null);
   const candidatePoolRef = useRef<CandidatePool | null>(null);
@@ -88,6 +91,11 @@ export function useBasketPlanner() {
   useEffect(() => {
     persistPlannerState(state);
   }, [state.catalogMode, state.intent, state.modelNames, state.selectedId, state.variants]);
+
+  useEffect(() => {
+    catalogRef.current = null;
+    candidatePoolRef.current = null;
+  }, [profile]);
 
   const runWorkflow = useCallback(async (message: string) => {
     abortRef.current?.abort();
@@ -139,7 +147,7 @@ export function useBasketPlanner() {
         return;
       }
       dispatch({ type: "stage", stage: "searching" });
-      const catalog = catalogRef.current ?? await createCatalogClient(controller.signal);
+      const catalog = catalogRef.current ?? await createCatalogClient(profile, controller.signal);
       catalogRef.current = catalog;
       dispatch({ type: "catalog", mode: catalog.mode });
       dispatch({ type: "stage", stage: "composing" });
@@ -172,14 +180,19 @@ export function useBasketPlanner() {
       const appError = toAppError(error);
       dispatch({ type: "error", error: appError, pendingMessage: message });
     }
-  }, [llm, sessionId, state]);
+  }, [llm, profile, sessionId, state]);
 
   const submit = useCallback(async (message: string) => {
     const trimmed = message.trim();
     if (!trimmed) return;
+    const validationError = state.intent ? null : validateBasketRequest(trimmed);
+    if (validationError) {
+      dispatch({ type: "error", error: { source: "validation", code: "short_prompt", message: validationError, recoverable: true }, pendingMessage: trimmed });
+      return;
+    }
     dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "user", content: trimmed, createdAt: Date.now() } });
     await runWorkflow(trimmed);
-  }, [runWorkflow]);
+  }, [runWorkflow, state.intent]);
 
   const retry = useCallback(() => {
     if (state.pendingMessage) void runWorkflow(state.pendingMessage);
@@ -187,13 +200,14 @@ export function useBasketPlanner() {
 
   const reconnectCatalog = useCallback(async () => {
     dispatch({ type: "catalog", mode: "connecting" });
-    const catalog = await createCatalogClient();
+    const catalog = await createCatalogClient(profile);
     catalogRef.current = catalog;
     dispatch({ type: "catalog", mode: catalog.mode });
-  }, []);
+  }, [profile]);
 
   const mockResults = useCallback(() => {
     abortRef.current?.abort();
+    candidatePoolRef.current = { intentFingerprint: buildCatalogFingerprint(mockIntent), products: mockCandidateProducts, createdAt: Date.now() };
     dispatch({ type: "catalog", mode: "live" });
     dispatch({ type: "ready", intent: mockIntent, variants: mockVariants, models: ["debug/mock"] });
   }, []);
@@ -205,7 +219,7 @@ export function useBasketPlanner() {
       let catalog = catalogRef.current;
       if (!catalog) {
         dispatch({ type: "catalog", mode: "connecting" });
-        catalog = await createCatalogClient();
+        catalog = await createCatalogClient(profile);
         catalogRef.current = catalog;
         dispatch({ type: "catalog", mode: catalog.mode });
       }
@@ -218,7 +232,20 @@ export function useBasketPlanner() {
       dispatch({ type: "error", error: { source: "mcp", code: "cart", message: "Не удалось создать ссылку. Список товаров можно скопировать и использовать вручную.", recoverable: true } });
       return null;
     }
-  }, [state]);
+  }, [profile, state]);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+    activeRequestIdRef.current = null;
+    dispatch({ type: "stage", stage: "idle" });
+  }, []);
+
+  const replaceItem = useCallback((variantId: string, xmlId: string) => {
+    const variant = state.variants.find((item) => item.id === variantId);
+    const pool = candidatePoolRef.current?.products.length ? candidatePoolRef.current.products : state.variants.flatMap((item) => item.items);
+    if (!variant) return;
+    dispatch({ type: "items", id: variantId, items: replaceBasketItem(variant.items, pool, xmlId) });
+  }, [state.variants]);
 
   return {
     state,
@@ -227,6 +254,8 @@ export function useBasketPlanner() {
     reconnectCatalog,
     mockResults,
     createCart,
+    cancel,
+    replaceItem,
     selectVariant: (id: string) => dispatch({ type: "select", id }),
     clearVariantSelection: () => dispatch({ type: "select", id: null }),
     updateItems: (id: string, items: BasketItem[]) => dispatch({ type: "items", id, items }),
@@ -312,18 +341,45 @@ const mockIntent: BasketIntent = {
   ],
 };
 
-const mockItems: BasketItem[] = [
+const mockBalancedItems: BasketItem[] = [
   mockItem("debug-101", "Салат \"Витаминный\" с лимонной заправкой", 149, 4, "Овощи", "Добавляет свежесть"),
   mockItem("debug-102", "Яйца отварные, 2 шт", 129, 4, "Белок", "Быстро закрывает белок"),
   mockItem("debug-103", "Тунец (скипджек) филе натуральный, 140 г", 219, 4, "Белок", "Не требует готовки"),
   mockItem("debug-104", "Снеки хрустящие из свеклы, тыквы и моркови", 96, 4, "Перекус", "Удобно добавить к ужину"),
 ];
 
-const mockVariants: BasketVariant[] = [
-  mockVariant("debug-balanced", "balanced", "Сбалансированная", "4 товаров на 2 388 ₽: компромисс цены и удобства.", mockItems, ["Оптимальный баланс бюджета и готовки"]),
-  mockVariant("debug-budget", "budget", "Экономная", "4 товаров на 1 852 ₽ с акцентом на экономию.", mockItems.map((item) => ({ ...item, priceRub: Math.max(78, item.priceRub - 42) })), ["Минимум стоимости"]),
-  mockVariant("debug-speed", "speed", "Самая простая", "4 товаров на 3 568 ₽ с минимумом приготовления.", mockItems.map((item) => ({ ...item, priceRub: item.priceRub + 76 })), ["Меньше готовки"]),
+const mockBudgetItems: BasketItem[] = [
+  mockItem("debug-201", "Крупа гречневая ядрица, 900 г", 115, 2, "Гарнир", "Дешёвая база для ужинов"),
+  mockItem("debug-202", "Картофель мытый, 1 кг", 89, 2, "Гарнир", "Сытный гарнир"),
+  mockItem("debug-203", "Филе бедра куриного охлаждённое", 245, 2, "Белок", "Можно приготовить на несколько дней"),
+  mockItem("debug-204", "Морковь свежая мытая", 72, 2, "Овощи", "Для гарнира и салата"),
+  mockItem("debug-205", "Фасоль красная консервированная", 106, 2, "Белок", "Запасной белок без переплаты"),
 ];
+
+const mockSpeedItems: BasketItem[] = [
+  mockItem("debug-301", "Котлета куриная с картофельным пюре", 369, 2, "Готовая еда", "Готовый ужин"),
+  mockItem("debug-302", "Суп куриный с лапшой", 289, 2, "Готовая еда", "Можно быстро разогреть"),
+  mockItem("debug-303", "Овощи гриль запечённые", 259, 2, "Овощи", "Гарнир без подготовки"),
+  mockItem("debug-304", "Салат овощной с зеленью", 189, 2, "Овощи", "Свежая добавка"),
+];
+
+const mockVariants: BasketVariant[] = [
+  mockVariant("debug-balanced", "balanced", "Сбалансированная", "Цена и готовка в балансе.", mockBalancedItems, ["Оптимальный баланс бюджета и готовки"]),
+  mockVariant("debug-budget", "budget", "Экономная", "Дешевле, но готовки может быть больше.", mockBudgetItems, ["Минимум стоимости"]),
+  mockVariant("debug-speed", "speed", "Быстрая", "Дороже, зато быстрее.", mockSpeedItems, ["Меньше готовки"]),
+].map((variant, _, variants) => {
+  const balancedTotal = variants.find((item) => item.strategy === "balanced")?.totalRub ?? variant.totalRub;
+  if (variant.strategy !== "budget" || variant.totalRub < balancedTotal) return variant;
+  return { ...variant, title: "Альтернатива", summary: "По цене выше баланса, проверьте состав." };
+});
+
+const mockCandidateProducts: NormalizedProduct[] = [
+  ...mockBalancedItems,
+  ...mockBudgetItems,
+  ...mockSpeedItems,
+  mockItem("debug-401", "Индейка филе охлаждённое", 279, 2, "Белок", "Замена из найденных товаров"),
+  mockItem("debug-402", "Рис жасмин длиннозёрный", 134, 2, "Гарнир", "Замена из найденных товаров"),
+].map(({ quantity: _quantity, role: _role, reason: _reason, ...product }) => product);
 
 function mockItem(xmlId: string, name: string, priceRub: number, quantity: number, role: string, reason: string): BasketItem {
   return {

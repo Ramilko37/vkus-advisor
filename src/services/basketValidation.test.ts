@@ -53,4 +53,31 @@ describe("hydrateAndValidateVariants", () => {
       { strategy: "speed", items },
     ], products, intent)).toHaveLength(0);
   });
+
+  it("keeps scenario titles and summaries honest against the balanced price", () => {
+    const balancedItems = ["1", "4", "6", "3"].map((xmlId) => ({ xmlId, quantity: 1, role: "side" as const, reasonCode: "good_value" as const }));
+    const expensiveBudgetItems = ["2", "4", "5", "6"].map((xmlId) => ({ xmlId, quantity: 1, role: "side" as const, reasonCode: "good_value" as const }));
+
+    const variants = hydrateAndValidateVariants([
+      { strategy: "balanced", items: balancedItems },
+      { strategy: "budget", items: expensiveBudgetItems },
+      { strategy: "speed", items: expensiveBudgetItems },
+    ], products, intent);
+
+    expect(variants.find((variant) => variant.strategy === "budget")?.title).toBe("Альтернатива");
+    expect(variants.find((variant) => variant.strategy === "budget")?.summary).toBe("По цене выше баланса, проверьте состав.");
+  });
+
+  it("does not describe the speed variant as more expensive when it is cheaper than balanced", () => {
+    const balancedItems = ["1", "2", "4", "6"].map((xmlId) => ({ xmlId, quantity: 1, role: "side" as const, reasonCode: "good_value" as const }));
+    const speedItems = ["1", "3", "4", "6"].map((xmlId) => ({ xmlId, quantity: 1, role: "side" as const, reasonCode: "good_value" as const }));
+
+    const variants = hydrateAndValidateVariants([
+      { strategy: "balanced", items: balancedItems },
+      { strategy: "budget", items: speedItems },
+      { strategy: "speed", items: speedItems },
+    ], products, intent);
+
+    expect(variants.find((variant) => variant.strategy === "speed")?.summary).toBe("Быстрее без переплаты.");
+  });
 });

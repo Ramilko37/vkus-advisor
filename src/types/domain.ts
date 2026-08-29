@@ -20,6 +20,17 @@ export interface SearchQuery {
   sort: ProductSort;
 }
 
+export interface UserProfile {
+  userId?: string;
+  email?: string;
+  address: string;
+  householdSize: number;
+  defaultDays: number;
+  defaultBudgetRub: number | null;
+  excludedIngredients: string[];
+  preferences: string[];
+}
+
 export interface BasketIntent {
   originalRequest: string;
   people: number;
@@ -40,6 +51,7 @@ export interface BasketIntent {
 export interface NormalizedProduct {
   id: string;
   xmlId: string;
+  retailer?: "vkusvill" | "pyaterochka" | "demo";
   name: string;
   priceRub: number;
   oldPriceRub?: number;

@@ -1,9 +1,22 @@
-import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, Minus, Plus, RefreshCw, ShoppingBasket, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, MapPin, Minus, Plus, RefreshCw, ShoppingBasket, Trash2, User, X } from "lucide-react";
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import type { BasketItem, BasketPriority, BasketVariant, WorkflowStage } from "./types/domain";
+import type { BasketItem, BasketVariant, UserProfile, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
+import type { AuthStatus } from "./hooks/useAuthProfile";
+import { DEFAULT_PROFILE, normalizeProfile } from "./services/profileRepository";
+import { getVariantPresentation } from "./services/variantPresentation";
+import { summarizeIntentSlots } from "./services/requestCopy";
 
 type Planner = ReturnType<typeof useBasketPlanner>;
+type AuthProfile = {
+  authConfigured: boolean;
+  authError: string | null;
+  authStatus: AuthStatus;
+  profile: UserProfile;
+  sendOtp: (email: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  updateProfile: (profile: UserProfile) => void;
+};
 
 const examples = [
   { title: "Ужины на 3 дня", meta: "2 человека · до 3000 ₽ · без грибов", prompt: "Ужины на 3 дня для двоих до 3000 ₽, без грибов" },
@@ -19,12 +32,6 @@ const briefChips = [
   { label: "быстро", fragment: "почти без готовки" },
 ];
 
-const scenarioOnboarding = [
-  { title: "Баланс", text: "цена + время" },
-  { title: "Экономия", text: "дешевле" },
-  { title: "Быстрее", text: "меньше готовки" },
-];
-
 const stageLabels: Record<WorkflowStage, string> = {
   idle: "Готово",
   analyzing: "Разбираем запрос",
@@ -34,12 +41,6 @@ const stageLabels: Record<WorkflowStage, string> = {
   ready: "Готово к выбору",
   creatingCart: "Готовим корзину",
   error: "Нужна правка",
-};
-
-const strategyLabels: Record<BasketPriority, string> = {
-  balanced: "Сбалансированная",
-  budget: "Экономная",
-  speed: "Самая простая",
 };
 
 const roleLabels: Record<string, string> = {
@@ -59,14 +60,162 @@ function scrollToTop() {
   window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
 }
 
-export function AppShell({ children, route }: { children: ReactNode; route: "home" | "results" }) {
+export function AppShell({ children, route, authProfile }: { children: ReactNode; route: "home" | "results"; authProfile: AuthProfile }) {
   return (
     <main className={`app-shell kit-shell ${route}-route`} data-g2-mode="compact">
+      <ProfileControl
+        profile={authProfile.profile}
+        authConfigured={authProfile.authConfigured}
+        authStatus={authProfile.authStatus}
+        authError={authProfile.authError}
+        onChange={authProfile.updateProfile}
+        onSendOtp={authProfile.sendOtp}
+        onSignOut={authProfile.signOut}
+      />
       <Header route={route} />
       <div className="workspace">
         {children}
       </div>
     </main>
+  );
+}
+
+export function ProfileControl({
+  profile,
+  authConfigured,
+  authStatus,
+  authError,
+  onChange,
+  onSendOtp,
+  onSignOut,
+}: {
+  profile: UserProfile;
+  authConfigured: boolean;
+  authStatus: AuthStatus;
+  authError: string | null;
+  onChange: (profile: UserProfile) => void;
+  onSendOtp: (email: string) => Promise<void> | void;
+  onSignOut: () => Promise<void> | void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<UserProfile>(() => normalizeProfile(profile));
+  const [email, setEmail] = useState(profile.email ?? "");
+  const hasAddress = profile.address.length > 0;
+  const save = (event: FormEvent) => {
+    event.preventDefault();
+    onChange(normalizeProfile(draft));
+    setOpen(false);
+  };
+  const saveField = <K extends keyof UserProfile>(key: K, value: UserProfile[K]) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+  };
+  const parseList = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
+
+  useEffect(() => {
+    if (open) {
+      setDraft(normalizeProfile(profile));
+      setEmail(profile.email ?? "");
+    }
+  }, [open, profile]);
+
+  return (
+    <>
+      <button className={`profile-trigger liquid-glass ${hasAddress ? "has-address" : ""}`} type="button" onClick={() => setOpen(true)} aria-label={hasAddress ? `Адрес: ${profile.address}` : "Добавить адрес"}>
+        {hasAddress ? <MapPin size={19} /> : <User size={19} />}
+      </button>
+      {open && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={() => setOpen(false)}>
+          <form className="dialog profile-dialog liquid-glass" onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="profile-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="close-button" type="button" onClick={() => setOpen(false)} aria-label="Закрыть"><X size={18} /></button>
+            <p className="section-kicker">Профиль</p>
+            <h2 id="profile-title">Адрес доставки</h2>
+            <p className="profile-dialog-copy">Нужен для поиска товаров в ближайших магазинах.</p>
+            {authConfigured && authStatus !== "signedIn" && (
+              <div className="profile-auth-panel">
+                <label htmlFor="profile-email">Email</label>
+                <div className="profile-inline-action">
+                  <input
+                    id="profile-email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@example.com"
+                    type="email"
+                  />
+                  <button className="secondary-button" type="button" onClick={() => onSendOtp(email)}>Войти по email</button>
+                </div>
+                {authStatus === "linkSent" && <p className="profile-dialog-copy">Проверьте почту.</p>}
+              </div>
+            )}
+            {authConfigured && authStatus === "signedIn" && (
+              <p className="profile-dialog-copy">{profile.email ? `Вы вошли как ${profile.email}.` : "Вы вошли в профиль."}</p>
+            )}
+            {authError && <p className="profile-dialog-error" role="alert">{authError}</p>}
+            <div className="profile-form-grid">
+              <label htmlFor="profile-address">Адрес</label>
+              <input
+                id="profile-address"
+                value={draft.address}
+                onChange={(event) => saveField("address", event.target.value)}
+                placeholder="Москва, улица, дом"
+                autoFocus
+              />
+              <div className="profile-number-grid">
+                <label htmlFor="profile-household">Людей</label>
+                <label htmlFor="profile-days">Дней</label>
+                <label htmlFor="profile-budget">Бюджет</label>
+                <input
+                  id="profile-household"
+                  min={1}
+                  max={12}
+                  type="number"
+                  value={draft.householdSize}
+                  onChange={(event) => saveField("householdSize", Number(event.target.value))}
+                />
+                <input
+                  id="profile-days"
+                  min={1}
+                  max={14}
+                  type="number"
+                  value={draft.defaultDays}
+                  onChange={(event) => saveField("defaultDays", Number(event.target.value))}
+                />
+                <input
+                  id="profile-budget"
+                  min={100}
+                  max={100000}
+                  type="number"
+                  value={draft.defaultBudgetRub ?? ""}
+                  onChange={(event) => saveField("defaultBudgetRub", event.target.value ? Number(event.target.value) : null)}
+                  placeholder="₽"
+                />
+              </div>
+              <label htmlFor="profile-excluded">Ограничения</label>
+              <input
+                id="profile-excluded"
+                value={draft.excludedIngredients.join(", ")}
+                onChange={(event) => saveField("excludedIngredients", parseList(event.target.value))}
+                placeholder="грибы, острое"
+              />
+              <label htmlFor="profile-preferences">Предпочтения</label>
+              <input
+                id="profile-preferences"
+                value={draft.preferences.join(", ")}
+                onChange={(event) => saveField("preferences", parseList(event.target.value))}
+                placeholder="белок, меньше готовки"
+              />
+            </div>
+            <div className="dialog-actions">
+              <button className="primary-button" type="submit">Сохранить</button>
+              {hasAddress && <button className="secondary-button" type="button" onClick={() => {
+                onChange(DEFAULT_PROFILE);
+                setOpen(false);
+              }}>Очистить</button>}
+              {authConfigured && authStatus === "signedIn" && <button className="secondary-button" type="button" onClick={() => onSignOut()}>Выйти</button>}
+            </div>
+          </form>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -134,15 +283,7 @@ export function MessageBubble({ message }: { message: Planner["state"]["messages
 
 export function IntentChips({ intent }: { intent: Planner["state"]["intent"] }) {
   if (!intent) return null;
-  const chips = [
-    `${intent.people} чел.`,
-    `${intent.days} дн.`,
-    intent.budgetRub ? `до ${intent.budgetRub.toLocaleString("ru-RU")} ₽` : "без бюджета",
-    intent.meals.join(", "),
-    intent.maxCookingMinutes ? `до ${intent.maxCookingMinutes} мин` : "время не задано",
-    intent.excludedIngredients.length ? `без: ${intent.excludedIngredients.join(", ")}` : "без исключений",
-    intent.priority === "budget" ? "экономия" : intent.priority === "speed" ? "проще" : "баланс",
-  ];
+  const chips = summarizeIntentSlots(intent);
   return (
     <div className="chips" aria-label="Параметры запроса">
       {chips.map((chip) => <span key={chip}>{chip}</span>)}
@@ -151,7 +292,7 @@ export function IntentChips({ intent }: { intent: Planner["state"]["intent"] }) 
   );
 }
 
-export function FullscreenLoader({ stage }: { stage: WorkflowStage }) {
+export function FullscreenLoader({ stage, intent, onCancel }: { stage: WorkflowStage; intent: Planner["state"]["intent"]; onCancel: () => void }) {
   const steps: Array<{ id: WorkflowStage; title: string; text: string }> = [
     { id: "analyzing", title: "Запрос", text: "Выделяем дни, бюджет и ограничения" },
     { id: "searching", title: "Каталог", text: "Ищем подходящие товары" },
@@ -164,6 +305,11 @@ export function FullscreenLoader({ stage }: { stage: WorkflowStage }) {
       <div className="liquid-loader-card liquid-glass">
         <p className="loader-kicker">{stageLabels[stage]}</p>
         <h2>{stage === "creatingCart" ? "Готовим ссылку на корзину" : "Подбираем корзину"}</h2>
+        {intent && (
+          <div className="loader-slots" aria-label="Параметры запроса">
+            {summarizeIntentSlots(intent).map((slot) => <span key={slot}>{slot}</span>)}
+          </div>
+        )}
         <ol className="loader-steps">
           {steps.map((step, index) => (
             <li key={step.id} className={index < activeIndex ? "done" : index === activeIndex ? "current" : ""}>
@@ -175,6 +321,7 @@ export function FullscreenLoader({ stage }: { stage: WorkflowStage }) {
             </li>
           ))}
         </ol>
+        <button className="secondary-button" type="button" onClick={onCancel}>Отменить</button>
       </div>
     </div>
   );
@@ -219,14 +366,6 @@ export function ChatComposer({ value, onChange, onSubmit, busy }: { value: strin
         <label htmlFor="basket-request">Что собрать?</label>
         <p id="basket-request-hint">Добавьте срок, людей, бюджет или ограничения.</p>
       </div>
-      <ul className="scenario-onboarding" aria-label="После запроса покажем три сценария корзины">
-        {scenarioOnboarding.map((item) => (
-          <li key={item.title}>
-            <strong>{item.title}</strong>
-            <span>{item.text}</span>
-          </li>
-        ))}
-      </ul>
       <div className="brief-chips" aria-label="Быстро добавить параметры">
         {briefChips.map((chip) => (
           <button key={chip.fragment} type="button" onClick={() => addBriefChip(chip.fragment)}>
@@ -245,9 +384,9 @@ export function ChatComposer({ value, onChange, onSubmit, busy }: { value: strin
           rows={3}
           aria-describedby="basket-request-hint"
         />
-        <button type="submit" disabled={busy || !hasText} aria-label={hasText ? "Собрать корзину" : "Опишите задачу"} aria-keyshortcuts="Control+Enter Meta+Enter">
+        <button type="submit" disabled={busy || !hasText} aria-label={hasText ? "Подобрать 3 корзины" : "Введите задачу для подбора"} aria-keyshortcuts="Control+Enter Meta+Enter">
           {busy ? <Loader2 className="spin" size={18} /> : <ShoppingBasket size={18} />}
-          <span>{busy ? "Собираем..." : hasText ? "Собрать" : "Опишите задачу"}</span>
+          <span>{busy ? "Собираем..." : "Подобрать 3 корзины"}</span>
         </button>
       </div>
     </form>
@@ -265,7 +404,6 @@ export function BasketResults({ planner }: { planner: Planner }) {
   const [openedId, setOpenedId] = useState<string | null>(planner.state.selectedId);
   const variants = planner.state.variants;
   const selected = planner.state.variants.find((variant) => variant.id === openedId) ?? null;
-  const balancedTotal = planner.state.variants.find((variant) => variant.strategy === "balanced")?.totalRub ?? planner.state.variants[0]?.totalRub ?? null;
   const openVariant = (id: string) => {
     planner.selectVariant(id);
     setOpenedId(id);
@@ -290,9 +428,11 @@ export function BasketResults({ planner }: { planner: Planner }) {
         </div>
         <SelectedBasketActions
           variant={selected}
+          variants={variants}
           mode={planner.state.catalogMode}
           creating={planner.state.stage === "creatingCart"}
           onItems={(items) => planner.updateItems(selected.id, items)}
+          onReplace={(xmlId) => planner.replaceItem(selected.id, xmlId)}
           onCreateCart={planner.createCart}
         />
       </section>
@@ -314,7 +454,7 @@ export function BasketResults({ planner }: { planner: Planner }) {
             key={variant.id}
             variant={variant}
             recommended={variant.strategy === "balanced"}
-            balancedTotal={balancedTotal}
+            variants={variants}
             onSelect={() => openVariant(variant.id)}
           />
         ))}
@@ -361,39 +501,36 @@ export function BasketResultsSkeleton({ stage }: { stage: WorkflowStage }) {
   );
 }
 
-export function BasketVariantCard({ variant, recommended, balancedTotal, onSelect }: { variant: BasketVariant; recommended: boolean; balancedTotal: number | null; onSelect: () => void }) {
-  const priceDelta = balancedTotal === null || variant.strategy === "balanced" ? null : variant.totalRub - balancedTotal;
-  const priceTone = priceDelta === null ? "Базовый вариант" : priceDelta < 0 ? `−${Math.abs(priceDelta).toLocaleString("ru-RU")} ₽ к балансу` : `+${priceDelta.toLocaleString("ru-RU")} ₽ к балансу`;
-  const difference = strategyDifferences[variant.strategy] ?? variant.summary;
+export function BasketVariantCard({ variant, recommended, variants, onSelect }: { variant: BasketVariant; recommended: boolean; variants: BasketVariant[]; onSelect: () => void }) {
+  const presentation = getVariantPresentation(variant, variants);
 
   return (
     <article className="variant-card vv-basket-variant-card" data-od-id={`variant-card-${variant.id}`}>
       <button className="variant-card-button" type="button" onClick={onSelect} aria-label={`Открыть корзину ${variant.title}`}>
         <div className="variant-card-top">
           <div>
-            <h2>{strategyLabels[variant.strategy] ?? variant.title}</h2>
+            <h2>{presentation.title}</h2>
+            <small>{presentation.subtitle}</small>
           </div>
-          {recommended && <strong className="recommend-badge">Рекомендуем</strong>}
+          {recommended && presentation.recommendationLabel && <strong className="recommend-badge">{presentation.recommendationLabel}</strong>}
         </div>
         <strong className="price">{variant.totalRub.toLocaleString("ru-RU")} ₽</strong>
         <div className="variant-compare-line">
-          <span>{variant.uniqueItemsCount} позиций</span>
-          <span>{priceTone}</span>
+          <span>{presentation.coverageLabel}</span>
+          <span>{presentation.cookingLabel}</span>
+          <span>{presentation.priceDeltaLabel}</span>
         </div>
-        <p className="variant-difference">{difference}</p>
+        <ul className="variant-preview-list" aria-label="В составе">
+          {presentation.previewItems.map((name) => <li key={name}>{name}</li>)}
+        </ul>
+        <p className="variant-difference">{presentation.tradeoffText}</p>
         <span className="variant-card-action">Открыть</span>
       </button>
     </article>
   );
 }
 
-const strategyDifferences: Record<BasketPriority, string> = {
-  balanced: "Цена и готовка в балансе.",
-  budget: "Дешевле, но больше готовки.",
-  speed: "Дороже, зато быстрее.",
-};
-
-export function BasketItemRow({ item, onQuantity, onDelete }: { item: BasketItem; onQuantity: (quantity: number) => void; onDelete: () => void }) {
+export function BasketItemRow({ item, onQuantity, onDelete, onReplace }: { item: BasketItem; onQuantity: (quantity: number) => void; onDelete: () => void; onReplace: () => void }) {
   return (
     <div className="basket-row vv-basket-item-row">
       <ProductThumb item={item} />
@@ -407,6 +544,7 @@ export function BasketItemRow({ item, onQuantity, onDelete }: { item: BasketItem
           <b>{item.quantity}</b>
           <button type="button" onClick={() => onQuantity(item.quantity + 1)} disabled={item.quantity >= 9} aria-label="Увеличить"><Plus size={16} /></button>
         </div>
+        <button type="button" className="secondary-button replace-button" onClick={onReplace}>Заменить</button>
         <button type="button" className="icon-button" onClick={onDelete} aria-label="Удалить"><Trash2 size={17} /></button>
       </div>
       <b className="row-price">{Math.round(item.priceRub * item.quantity).toLocaleString("ru-RU")} ₽</b>
@@ -426,12 +564,22 @@ function ProductThumb({ item }: { item: BasketItem }) {
   );
 }
 
-export function SelectedBasketActions({ variant, mode, creating, onItems, onCreateCart }: { variant: BasketVariant; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onCreateCart: () => Promise<string | null> }) {
+export function SelectedBasketActions({ variant, variants, mode, creating, onItems, onReplace, onCreateCart }: { variant: BasketVariant; variants: BasketVariant[]; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onReplace: (xmlId: string) => void; onCreateCart: () => Promise<string | null> }) {
   const [cartUrl, setCartUrl] = useState<string | null>(null);
+  const [removed, setRemoved] = useState<BasketItem | null>(null);
+  const presentation = getVariantPresentation(variant, variants);
   const list = useMemo(() => variant.items.map((item) => `${item.quantity} × ${item.name} — ${Math.round(item.priceRub * item.quantity)} ₽`).join("\n"), [variant.items]);
   const copy = () => void navigator.clipboard.writeText(list);
   const update = (xmlId: string, quantity: number) => onItems(variant.items.map((item) => item.xmlId === xmlId ? { ...item, quantity: Math.min(9, Math.max(1, quantity)) } : item));
-  const remove = (xmlId: string) => onItems(variant.items.filter((item) => item.xmlId !== xmlId));
+  const remove = (item: BasketItem) => {
+    setRemoved(item);
+    onItems(variant.items.filter((current) => current.xmlId !== item.xmlId));
+  };
+  const undoRemove = () => {
+    if (!removed) return;
+    onItems([...variant.items, removed]);
+    setRemoved(null);
+  };
 
   return (
     <>
@@ -439,14 +587,28 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
         <div className="section-heading">
           <div>
             <p className="section-kicker">Выбранная корзина</p>
-            <h2>{variant.title}</h2>
+            <h2>{presentation.title}</h2>
             <p>{variant.totalRub.toLocaleString("ru-RU")} ₽ · {variant.uniqueItemsCount} позиций</p>
           </div>
           <button className="secondary-button" type="button" onClick={copy}><Copy size={17} /> Скопировать</button>
         </div>
         <div className="rows">
-          {variant.items.map((item) => <BasketItemRow key={item.xmlId} item={item} onQuantity={(quantity) => update(item.xmlId, quantity)} onDelete={() => remove(item.xmlId)} />)}
+          {variant.items.map((item) => (
+            <BasketItemRow
+              key={item.xmlId}
+              item={item}
+              onQuantity={(quantity) => update(item.xmlId, quantity)}
+              onDelete={() => remove(item)}
+              onReplace={() => onReplace(item.xmlId)}
+            />
+          ))}
         </div>
+        {removed && <button className="secondary-button undo-button" type="button" onClick={undoRemove}>Вернуть {removed.name}</button>}
+        {variant.warnings.length > 0 && (
+          <ul className="variant-warnings" aria-label="Предупреждения по корзине">
+            {variant.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        )}
         {mode === "demo" && <p className="demo-note">Это пример корзины: цены и товары нужны для ориентира. Список можно скопировать.</p>}
       </section>
       <CheckoutBar
@@ -471,12 +633,12 @@ function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, onCreateCar
         <span>{itemCount} позиций</span>
       </div>
       {mode === "demo" ? (
-        <button className="primary-button checkout-button" type="button" disabled>Ссылка недоступна</button>
+        <button className="primary-button checkout-button" type="button" disabled>ВкусВилл недоступен</button>
       ) : cartUrl ? (
-        <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> Открыть</a>
+        <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> Открыть во ВкусВилл</a>
       ) : (
         <button className="primary-button checkout-button" type="button" disabled={creating} onClick={onCreateCart}>
-          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} Создать ссылку
+          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} Открыть во ВкусВилл
         </button>
       )}
     </div>
@@ -500,15 +662,5 @@ export function DemoModeBanner({ onReconnect }: { onReconnect: () => void }) {
       <span>Каталог не ответил, поэтому показываем пример. Его можно открыть, сравнить и скопировать.</span>
       <button type="button" onClick={onReconnect}>Повторить</button>
     </div>
-  );
-}
-
-export function TechnicalDetails({ mode, models }: { mode: string; models: string[] }) {
-  return (
-    <details className="technical">
-      <summary>Техническая информация</summary>
-      <p>Каталог: {mode}</p>
-      <p>Модель: {models[models.length - 1] ?? "ещё не вызывалась"}</p>
-    </details>
   );
 }
