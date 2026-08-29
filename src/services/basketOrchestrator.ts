@@ -1,7 +1,7 @@
 import { basketPrompt } from "../prompts/basketPrompt";
 import { intentPrompt } from "../prompts/intentPrompt";
 import { basketDraftJsonSchema, basketDraftResponseSchema, basketIntentJsonSchema, basketIntentSchema } from "../schemas";
-import type { BasketIntent, BasketVariant, BasketVariantDraft, CatalogClient, NormalizedProduct, StructuredGenerationResult } from "../types/domain";
+import type { BasketIntent, BasketVariant, BasketVariantDraft, CatalogClient, NormalizedProduct, StructuredGenerationResult, UserProfile } from "../types/domain";
 import { hydrateAndValidateVariants } from "./basketValidation";
 import { candidatePayloadBytes, selectCandidatesForLlm, toLlmCandidate } from "./candidateSelection";
 import { compactPreviousIntent, normalizeBasketIntent } from "./intentUtils";
@@ -47,10 +47,11 @@ export async function analyzeIntent(
   llm: LlmClientLike,
   sessionId: string,
   signal?: AbortSignal,
+  profile?: UserProfile,
 ) {
   const result = await llm.generateStructured<BasketIntent>({
     systemPrompt: intentPrompt,
-    userPayload: { previousIntent: compactPreviousIntent(previousIntent), selectedBasketSummary, newUserMessage: message.slice(0, 2000) },
+    userPayload: { previousIntent: compactPreviousIntent(previousIntent), selectedBasketSummary, profileDefaults: profile ? profileDefaults(profile) : null, newUserMessage: message.slice(0, 2000) },
     jsonSchema: basketIntentJsonSchema,
     validator: basketIntentSchema,
     sessionId,
@@ -58,6 +59,15 @@ export async function analyzeIntent(
     signal,
   });
   return { ...result, data: normalizeBasketIntent(result.data) };
+}
+
+function profileDefaults(profile: UserProfile) {
+  return {
+    address: profile.address || null,
+    people: profile.householdSize,
+    excludedIngredients: profile.excludedIngredients,
+    preferences: profile.preferences,
+  };
 }
 
 export async function composeBaskets(

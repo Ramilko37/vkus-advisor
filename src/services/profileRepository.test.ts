@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_PROFILE, loadGuestProfile, mergeGuestIntoRemote, saveGuestProfile } from "./profileRepository";
+import { DEFAULT_PROFILE, loadGuestProfile, mergeGuestIntoRemote } from "./profileRepository";
 import type { UserProfile } from "../types/domain";
 
 const storageKey = "vkusvill-advisor:user-profile";
@@ -23,22 +23,19 @@ describe("profileRepository", () => {
   });
 
   it("saves and loads a normalized guest profile", () => {
-    saveGuestProfile({
-      ...DEFAULT_PROFILE,
+    window.localStorage.setItem(storageKey, JSON.stringify({
       address: "  Москва, Тверская 1  ",
       householdSize: 2,
       defaultDays: 5,
       defaultBudgetRub: 3000,
       excludedIngredients: [" грибы ", ""],
       preferences: ["быстро"],
-    });
+    }));
 
     expect(loadGuestProfile()).toEqual({
       ...DEFAULT_PROFILE,
       address: "Москва, Тверская 1",
       householdSize: 2,
-      defaultDays: 5,
-      defaultBudgetRub: 3000,
       excludedIngredients: ["грибы"],
       preferences: ["быстро"],
     });
@@ -50,8 +47,6 @@ describe("profileRepository", () => {
       email: "user@example.com",
       address: "Казань, Баумана 1",
       householdSize: 3,
-      defaultDays: 7,
-      defaultBudgetRub: 5000,
       excludedIngredients: ["орехи"],
       preferences: ["детское"],
     };
@@ -65,8 +60,6 @@ describe("profileRepository", () => {
       ...DEFAULT_PROFILE,
       address: "Москва",
       householdSize: 2,
-      defaultDays: 4,
-      defaultBudgetRub: 2500,
       excludedIngredients: ["грибов"],
       preferences: ["без готовки"],
     };

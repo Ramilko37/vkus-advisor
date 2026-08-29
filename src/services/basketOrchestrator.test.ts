@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeBaskets } from "./basketOrchestrator";
+import { analyzeIntent, composeBaskets } from "./basketOrchestrator";
 import type { BasketIntent, CatalogClient, NormalizedProduct, StructuredGenerationResult } from "../types/domain";
 
 const intent: BasketIntent = {
@@ -37,6 +37,33 @@ const catalog: CatalogClient = {
 };
 
 describe("composeBaskets", () => {
+  it("sends persistent profile defaults to the intent prompt separately", async () => {
+    let payload: unknown;
+    const model = {
+      async generateStructured<T>(options: { userPayload: unknown }): Promise<StructuredGenerationResult<T>> {
+        payload = options.userPayload;
+        return { model: "test-model", data: intent as T };
+      },
+    };
+
+    await analyzeIntent("ужины без лука", null, null, model, "session", undefined, {
+      address: "Москва, Тверская 1",
+      householdSize: 2,
+      excludedIngredients: ["грибы"],
+      preferences: ["больше белка"],
+    });
+
+    expect(payload).toEqual(expect.objectContaining({
+      profileDefaults: {
+        address: "Москва, Тверская 1",
+        people: 2,
+        excludedIngredients: ["грибы"],
+        preferences: ["больше белка"],
+      },
+      newUserMessage: "ужины без лука",
+    }));
+  });
+
   it("hydrates three model drafts using only candidate products", async () => {
     const model = {
       async generateStructured<T>(): Promise<StructuredGenerationResult<T>> {

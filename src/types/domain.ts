@@ -25,8 +25,6 @@ export interface UserProfile {
   email?: string;
   address: string;
   householdSize: number;
-  defaultDays: number;
-  defaultBudgetRub: number | null;
   excludedIngredients: string[];
   preferences: string[];
 }

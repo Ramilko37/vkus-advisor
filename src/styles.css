@@ -192,18 +192,42 @@ button:disabled {
   border-color: color-mix(in srgb, var(--accent) 22%, rgba(255, 255, 255, 0.72));
 }
 
-.profile-dialog {
+.dialog.profile-dialog {
   display: grid;
-  gap: var(--space-3);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, 0.96), rgba(246, 251, 248, 0.88)),
+    color-mix(in srgb, var(--surface) 92%, var(--accent) 8%);
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(30px) saturate(1.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 28px 70px rgba(23, 32, 25, 0.2);
 }
 
 .profile-dialog h2,
+.profile-dialog h3,
 .profile-dialog p {
   margin: 0;
 }
 
+.profile-dialog h2 {
+  font-size: 26px;
+  line-height: 1.05;
+}
+
+.profile-dialog h3 {
+  font-size: 17px;
+  line-height: 1.15;
+}
+
 .profile-dialog-copy {
   color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.3;
 }
 
 .profile-dialog label {
@@ -211,10 +235,51 @@ button:disabled {
   font-weight: var(--font-weight-strong);
 }
 
-.profile-auth-panel,
-.profile-form-grid {
+.profile-sheet-header,
+.profile-sheet-content,
+.profile-save-bar {
+  padding: var(--space-4);
+}
+
+.profile-sheet-header {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.66);
+}
+
+.profile-sheet-content {
   display: grid;
   gap: var(--space-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.profile-save-bar {
+  padding-top: var(--space-3);
+  padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(23, 32, 25, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.9));
+  backdrop-filter: blur(16px);
+}
+
+.profile-section,
+.profile-auth-panel {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.profile-section-heading {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.profile-section-heading > span {
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-strong);
 }
 
 .profile-inline-action {
@@ -224,19 +289,133 @@ button:disabled {
   align-items: center;
 }
 
-.profile-number-grid {
+.dialog.profile-dialog input {
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.profile-location-button {
+  width: fit-content;
+  margin-top: var(--space-1);
+}
+
+.household-stepper {
+  min-height: 56px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: var(--radius-control);
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 56px minmax(0, 1fr) 56px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.household-stepper button,
+.profile-tag button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.household-stepper button:not(:disabled):hover,
+.profile-tag button:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.household-stepper button:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.household-stepper output {
+  justify-self: center;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: var(--font-weight-action);
+}
+
+.profile-tags {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.profile-tag {
+  min-height: 40px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  background: color-mix(in srgb, var(--accent) 8%, white);
+  color: var(--accent-hover);
+  font-weight: var(--font-weight-strong);
+}
+
+.profile-empty-tags {
+  color: var(--text-muted);
+}
+
+.tag-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-2);
 }
 
-.profile-number-grid label {
-  font-size: var(--font-size-small);
+.tag-editor .profile-section-heading {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.tag-editor .link-button {
+  width: fit-content;
+  min-height: 40px;
+  padding-inline: var(--space-3);
 }
 
 .profile-dialog-error {
   color: var(--error);
   font-weight: var(--font-weight-strong);
+}
+
+.profile-signout {
+  min-height: 36px;
+  padding-inline: var(--space-2);
+}
+
+.profile-toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(var(--space-5), env(safe-area-inset-bottom));
+  z-index: 40;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, rgba(255, 255, 255, 0.72));
+  border-radius: var(--radius-pill);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--accent-hover);
+  font-weight: var(--font-weight-action);
+  box-shadow: 0 16px 38px rgba(23, 32, 25, 0.16);
+}
+
+.primary-button.full {
+  width: 100%;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .conversation-panel,
@@ -1184,15 +1363,17 @@ button:disabled {
   position: fixed;
   inset: 0;
   z-index: 30;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: rgba(23, 32, 25, 0.28);
+  display: flex;
+  align-items: flex-end;
+  padding: var(--space-3);
+  background: rgba(23, 32, 25, 0.44);
+  backdrop-filter: blur(8px);
 }
 
 .dialog {
   position: relative;
-  width: min(100%, 520px);
+  width: 100%;
+  max-height: min(100dvh, 720px);
   border-radius: var(--radius-large);
   padding: var(--space-5);
 }
@@ -1240,6 +1421,17 @@ button:disabled {
 }
 
 @media (min-width: 720px) {
+  .dialog-backdrop {
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-5);
+  }
+
+  .dialog {
+    width: min(100%, 580px);
+    max-height: min(88dvh, 760px);
+  }
+
   .home-route {
     align-content: start;
     padding-top: var(--space-10);

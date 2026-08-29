@@ -1,4 +1,3 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import type { UserProfile } from "../types/domain";
 import { getSupabaseClient } from "./supabaseClient";
 
@@ -7,8 +6,6 @@ export const PROFILE_STORAGE_KEY = "vkusvill-advisor:user-profile";
 export const DEFAULT_PROFILE: UserProfile = {
   address: "",
   householdSize: 1,
-  defaultDays: 3,
-  defaultBudgetRub: null,
   excludedIngredients: [],
   preferences: [],
 };
@@ -18,8 +15,6 @@ interface ProfileRow {
   email: string | null;
   address: string;
   household_size: number;
-  default_days: number;
-  default_budget_rub: number | null;
   excluded_ingredients: string[];
   preferences: string[];
 }
@@ -51,7 +46,7 @@ export async function loadRemoteProfile(userId: string, client = getSupabaseClie
   if (!client) return null;
   const { data, error } = await client
     .from("profiles")
-    .select("user_id,email,address,household_size,default_days,default_budget_rub,excluded_ingredients,preferences")
+    .select("user_id,email,address,household_size,excluded_ingredients,preferences")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
@@ -64,7 +59,7 @@ export async function upsertRemoteProfile(profile: UserProfile, client = getSupa
   const { data, error } = await client
     .from("profiles")
     .upsert(row, { onConflict: "user_id" })
-    .select("user_id,email,address,household_size,default_days,default_budget_rub,excluded_ingredients,preferences")
+    .select("user_id,email,address,household_size,excluded_ingredients,preferences")
     .single();
   if (error) throw error;
   return fromRow(data as ProfileRow);
@@ -76,8 +71,6 @@ export function normalizeProfile(profile: Partial<UserProfile>): UserProfile {
     email: textOrUndefined(profile.email),
     address: cleanText(profile.address),
     householdSize: clampNumber(profile.householdSize, 1, 12, DEFAULT_PROFILE.householdSize),
-    defaultDays: clampNumber(profile.defaultDays, 1, 14, DEFAULT_PROFILE.defaultDays),
-    defaultBudgetRub: profile.defaultBudgetRub === null || profile.defaultBudgetRub === undefined ? null : clampNumber(profile.defaultBudgetRub, 100, 100000, DEFAULT_PROFILE.defaultBudgetRub ?? 3000),
     excludedIngredients: cleanList(profile.excludedIngredients),
     preferences: cleanList(profile.preferences),
   };
@@ -89,8 +82,6 @@ function fromRow(row: ProfileRow): UserProfile {
     email: row.email ?? undefined,
     address: row.address,
     householdSize: row.household_size,
-    defaultDays: row.default_days,
-    defaultBudgetRub: row.default_budget_rub,
     excludedIngredients: row.excluded_ingredients,
     preferences: row.preferences,
   });
@@ -102,8 +93,6 @@ function toRow(profile: UserProfile): ProfileRow {
     email: profile.email || null,
     address: profile.address,
     household_size: profile.householdSize,
-    default_days: profile.defaultDays,
-    default_budget_rub: profile.defaultBudgetRub,
     excluded_ingredients: profile.excludedIngredients,
     preferences: profile.preferences,
   };
@@ -112,8 +101,6 @@ function toRow(profile: UserProfile): ProfileRow {
 function isEmptyRemoteProfile(profile: UserProfile) {
   return profile.address === ""
     && profile.householdSize === DEFAULT_PROFILE.householdSize
-    && profile.defaultDays === DEFAULT_PROFILE.defaultDays
-    && profile.defaultBudgetRub === DEFAULT_PROFILE.defaultBudgetRub
     && profile.excludedIngredients.length === 0
     && profile.preferences.length === 0;
 }

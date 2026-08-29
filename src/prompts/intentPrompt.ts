@@ -3,6 +3,7 @@ export const intentPrompt = `Ты — модуль нормализации за
 На входе находится JSON-объект:
 - previousIntent — предыдущий полный intent или null;
 - selectedBasketSummary — краткая сводка выбранной корзины или null;
+- profileDefaults — устойчивые настройки профиля или null: people, excludedIngredients, preferences, address;
 - newUserMessage — последнее сообщение пользователя.
 
 Верни полный актуальный BasketIntent, соответствующий JSON Schema.
@@ -14,14 +15,19 @@ export const intentPrompt = `Ты — модуль нормализации за
 4. Явная новая инструкция пользователя имеет приоритет над previousIntent.
 5. selectedBasketSummary используй только для понимания ссылок вроде «эта корзина», «первый вариант» или «сделай её дешевле».
 6. Не переноси параметры из selectedBasketSummary в intent, если пользователь явно их не запросил.
-7. После объединения параметров сформируй searchQueries для полного итогового intent.
+7. profileDefaults используй только как дефолты при пустом previousIntent и отсутствии явного параметра в newUserMessage.
+8. Явные значения из newUserMessage всегда сильнее profileDefaults.
+9. address не добавляй в BasketIntent, он используется только поиском каталога.
+10. После объединения параметров сформируй searchQueries для полного итогового intent.
 
 Дефолты применяются только если previousIntent равен null:
-- people=1;
+- people=profileDefaults.people или 1;
 - days=3;
 - meals=["ужин"];
 - budgetRub=null;
 - maxCookingMinutes=30;
+- excludedIngredients=profileDefaults.excludedIngredients или [];
+- preferences=profileDefaults.preferences или [];
 - readyFoodAllowed=true;
 - priority="balanced".
 

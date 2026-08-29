@@ -70,7 +70,7 @@ describe("useAuthProfile", () => {
   });
 
   it("merges guest profile into an empty remote profile after sign in", async () => {
-    saveGuestProfile({ ...DEFAULT_PROFILE, address: "Москва", householdSize: 2, defaultBudgetRub: 3000 });
+    saveGuestProfile({ ...DEFAULT_PROFILE, address: "Москва", householdSize: 2 });
     mocks.loadRemoteProfile.mockResolvedValue({ ...DEFAULT_PROFILE, userId: "user-1", email: "user@example.com" });
     mocks.upsertRemoteProfile.mockImplementation(async (profile) => profile);
     mocks.client = createMockClient((handler) => {
@@ -90,7 +90,6 @@ describe("useAuthProfile", () => {
       email: "user@example.com",
       address: "Москва",
       householdSize: 2,
-      defaultBudgetRub: 3000,
     }), mocks.client);
   });
 

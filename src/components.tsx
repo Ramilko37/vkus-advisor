@@ -3,7 +3,7 @@ import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useSta
 import type { BasketItem, BasketVariant, UserProfile, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
 import type { AuthStatus } from "./hooks/useAuthProfile";
-import { DEFAULT_PROFILE, normalizeProfile } from "./services/profileRepository";
+import { normalizeProfile } from "./services/profileRepository";
 import { getVariantPresentation } from "./services/variantPresentation";
 import { summarizeIntentSlots } from "./services/requestCopy";
 
@@ -15,7 +15,7 @@ type AuthProfile = {
   profile: UserProfile;
   sendOtp: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
-  updateProfile: (profile: UserProfile) => void;
+  updateProfile: (profile: UserProfile) => Promise<void> | void;
 };
 
 const examples = [
@@ -93,130 +93,303 @@ export function ProfileControl({
   authConfigured: boolean;
   authStatus: AuthStatus;
   authError: string | null;
-  onChange: (profile: UserProfile) => void;
+  onChange: (profile: UserProfile) => Promise<void> | void;
   onSendOtp: (email: string) => Promise<void> | void;
   onSignOut: () => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<UserProfile>(() => normalizeProfile(profile));
   const [email, setEmail] = useState(profile.email ?? "");
+  const [tagInput, setTagInput] = useState({ excludedIngredients: "", preferences: "" });
+  const [geoStatus, setGeoStatus] = useState<"idle" | "loading" | "success" | "denied" | "unavailable">("idle");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLFormElement>(null);
   const hasAddress = profile.address.length > 0;
-  const save = (event: FormEvent) => {
-    event.preventDefault();
-    onChange(normalizeProfile(draft));
+  const normalizedDraft = useMemo(() => normalizeProfile(draft), [draft]);
+  const normalizedProfile = useMemo(() => normalizeProfile(profile), [profile]);
+  const dirty = useMemo(() => !sameProfile(normalizedDraft, normalizedProfile), [normalizedDraft, normalizedProfile]);
+
+  const closeDialog = () => {
     setOpen(false);
+    window.setTimeout(() => triggerRef.current?.focus(), 0);
+  };
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextProfile = normalizeProfile(draft);
+    if (nextProfile.address && nextProfile.address.length < 5) {
+      setSaveStatus("error");
+      setSaveError("Адрес выглядит слишком коротким. Укажите город, улицу и дом.");
+      return;
+    }
+    setSaveStatus("saving");
+    setSaveError(null);
+    try {
+      await onChange(nextProfile);
+      setSaveStatus("saved");
+      setToast("Профиль сохранён");
+      closeDialog();
+      window.setTimeout(() => setToast(null), 1800);
+    } catch {
+      setSaveStatus("error");
+      setSaveError("Не удалось сохранить профиль. Попробуйте ещё раз.");
+    }
   };
   const saveField = <K extends keyof UserProfile>(key: K, value: UserProfile[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
   };
-  const parseList = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
+  const setHousehold = (value: number) => saveField("householdSize", Math.min(12, Math.max(1, value)));
+  const addTag = (key: "excludedIngredients" | "preferences") => {
+    const value = tagInput[key].trim();
+    if (!value || draft[key].some((item) => item.toLocaleLowerCase("ru-RU") === value.toLocaleLowerCase("ru-RU"))) return;
+    saveField(key, [...draft[key], value]);
+    setTagInput((current) => ({ ...current, [key]: "" }));
+  };
+  const removeTag = (key: "excludedIngredients" | "preferences", value: string) => {
+    saveField(key, draft[key].filter((item) => item !== value));
+  };
+  const detectLocation = () => {
+    if (!navigator.geolocation) {
+      setGeoStatus("unavailable");
+      return;
+    }
+    setGeoStatus("loading");
+    navigator.geolocation.getCurrentPosition(
+      () => setGeoStatus("success"),
+      (error) => setGeoStatus(error.code === error.PERMISSION_DENIED ? "denied" : "unavailable"),
+      { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 },
+    );
+  };
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDialog();
+      return;
+    }
+    if (event.key !== "Tab" || !dialogRef.current) return;
+    const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)")).filter((element) => element.offsetParent !== null);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   useEffect(() => {
     if (open) {
       setDraft(normalizeProfile(profile));
       setEmail(profile.email ?? "");
+      setTagInput({ excludedIngredients: "", preferences: "" });
+      setGeoStatus("idle");
+      setSaveStatus("idle");
+      setSaveError(null);
     }
   }, [open, profile]);
 
   return (
     <>
-      <button className={`profile-trigger liquid-glass ${hasAddress ? "has-address" : ""}`} type="button" onClick={() => setOpen(true)} aria-label={hasAddress ? `Адрес: ${profile.address}` : "Добавить адрес"}>
+      <button ref={triggerRef} className={`profile-trigger liquid-glass ${hasAddress ? "has-address" : ""}`} type="button" onClick={() => setOpen(true)} aria-label={hasAddress ? `Адрес: ${profile.address}` : "Добавить адрес"}>
         {hasAddress ? <MapPin size={19} /> : <User size={19} />}
       </button>
+      {toast && <div className="profile-toast" role="status">{toast}</div>}
       {open && (
-        <div className="dialog-backdrop" role="presentation" onMouseDown={() => setOpen(false)}>
-          <form className="dialog profile-dialog liquid-glass" onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="profile-title" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="close-button" type="button" onClick={() => setOpen(false)} aria-label="Закрыть"><X size={18} /></button>
-            <p className="section-kicker">Профиль</p>
-            <h2 id="profile-title">Адрес доставки</h2>
-            <p className="profile-dialog-copy">Нужен для поиска товаров в ближайших магазинах.</p>
-            {authConfigured && authStatus !== "signedIn" && (
-              <div className="profile-auth-panel">
-                <label htmlFor="profile-email">Email</label>
-                <div className="profile-inline-action">
-                  <input
-                    id="profile-email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="you@example.com"
-                    type="email"
-                  />
-                  <button className="secondary-button" type="button" onClick={() => onSendOtp(email)}>Войти по email</button>
+        <div className="dialog-backdrop" role="presentation" onMouseDown={closeDialog}>
+          <form ref={dialogRef} className="dialog profile-dialog liquid-glass" onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="profile-title" onMouseDown={(event) => event.stopPropagation()} onKeyDown={handleDialogKeyDown}>
+            <header className="profile-sheet-header">
+              <div>
+                <p className="section-kicker">Профиль</p>
+                <h2 id="profile-title">Профиль</h2>
+                <p className="profile-dialog-copy">Настройки, которые будем учитывать в следующих подборках.</p>
+              </div>
+              <button className="close-button" type="button" onClick={closeDialog} aria-label="Закрыть профиль"><X size={18} /></button>
+            </header>
+            <div className="profile-sheet-content">
+              <section className="profile-section" aria-labelledby="profile-account-title">
+                <div className="profile-section-heading">
+                  <h3 id="profile-account-title">Аккаунт</h3>
+                  {authConfigured && authStatus === "signedIn" && <button className="link-button profile-signout" type="button" onClick={() => onSignOut()}>Выйти</button>}
                 </div>
-                {authStatus === "linkSent" && <p className="profile-dialog-copy">Проверьте почту.</p>}
-              </div>
-            )}
-            {authConfigured && authStatus === "signedIn" && (
-              <p className="profile-dialog-copy">{profile.email ? `Вы вошли как ${profile.email}.` : "Вы вошли в профиль."}</p>
-            )}
-            {authError && <p className="profile-dialog-error" role="alert">{authError}</p>}
-            <div className="profile-form-grid">
-              <label htmlFor="profile-address">Адрес</label>
-              <input
-                id="profile-address"
-                value={draft.address}
-                onChange={(event) => saveField("address", event.target.value)}
-                placeholder="Москва, улица, дом"
-                autoFocus
-              />
-              <div className="profile-number-grid">
-                <label htmlFor="profile-household">Людей</label>
-                <label htmlFor="profile-days">Дней</label>
-                <label htmlFor="profile-budget">Бюджет</label>
+                {authConfigured && authStatus !== "signedIn" ? (
+                  <div className="profile-auth-panel">
+                    <label htmlFor="profile-email">Email</label>
+                    <div className="profile-inline-action">
+                      <input
+                        id="profile-email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        placeholder="you@example.com"
+                        type="email"
+                      />
+                      <button className="secondary-button" type="button" onClick={() => onSendOtp(email)}>Войти по email</button>
+                    </div>
+                    {authStatus === "linkSent" && <p className="profile-dialog-copy">Проверьте почту.</p>}
+                  </div>
+                ) : (
+                  <p className="profile-dialog-copy">{authConfigured ? (profile.email ?? "Вы вошли в профиль.") : "Гостевой профиль на этом устройстве."}</p>
+                )}
+              </section>
+              <section className="profile-section" aria-labelledby="profile-address-title">
+                <h3 id="profile-address-title">Адрес доставки</h3>
+                <p className="profile-dialog-copy">Нужен для поиска товаров в ближайших магазинах.</p>
+                <label htmlFor="profile-address">Адрес</label>
                 <input
-                  id="profile-household"
-                  min={1}
-                  max={12}
-                  type="number"
-                  value={draft.householdSize}
-                  onChange={(event) => saveField("householdSize", Number(event.target.value))}
+                  id="profile-address"
+                  value={draft.address}
+                  onChange={(event) => saveField("address", event.target.value)}
+                  placeholder="Москва, улица, дом"
+                  autoComplete="street-address"
+                  autoFocus
                 />
-                <input
-                  id="profile-days"
-                  min={1}
-                  max={14}
-                  type="number"
-                  value={draft.defaultDays}
-                  onChange={(event) => saveField("defaultDays", Number(event.target.value))}
-                />
-                <input
-                  id="profile-budget"
-                  min={100}
-                  max={100000}
-                  type="number"
-                  value={draft.defaultBudgetRub ?? ""}
-                  onChange={(event) => saveField("defaultBudgetRub", event.target.value ? Number(event.target.value) : null)}
-                  placeholder="₽"
-                />
-              </div>
-              <label htmlFor="profile-excluded">Ограничения</label>
-              <input
-                id="profile-excluded"
-                value={draft.excludedIngredients.join(", ")}
-                onChange={(event) => saveField("excludedIngredients", parseList(event.target.value))}
-                placeholder="грибы, острое"
+                <button className="secondary-button profile-location-button" type="button" onClick={detectLocation} disabled={geoStatus === "loading"}>
+                  {geoStatus === "loading" ? <Loader2 className="spin" size={17} /> : <MapPin size={17} />}
+                  Определить автоматически
+                </button>
+                {geoStatus !== "idle" && <p className="profile-dialog-copy" role="status">{geoStatusCopy[geoStatus]}</p>}
+              </section>
+              <section className="profile-section" aria-labelledby="profile-household-title">
+                <div className="profile-section-heading">
+                  <h3 id="profile-household-title">Домохозяйство</h3>
+                  <span>{peopleLabel(draft.householdSize)}</span>
+                </div>
+                <div className="household-stepper" role="group" aria-label="Количество людей">
+                  <button type="button" onClick={() => setHousehold(draft.householdSize - 1)} disabled={draft.householdSize <= 1} aria-label="Уменьшить количество людей"><Minus size={18} /></button>
+                  <output>{peopleLabel(draft.householdSize)}</output>
+                  <button type="button" onClick={() => setHousehold(draft.householdSize + 1)} disabled={draft.householdSize >= 12} aria-label="Увеличить количество людей"><Plus size={18} /></button>
+                </div>
+              </section>
+              <TagEditor
+                title="Ограничения"
+                description="То, что лучше не добавлять в будущие корзины."
+                items={draft.excludedIngredients}
+                inputValue={tagInput.excludedIngredients}
+                addButtonLabel="Добавить ограничение"
+                inputLabel="Новое ограничение"
+                placeholder="грибы"
+                removeLabel={(tag) => `Удалить ограничение ${tag}`}
+                onInput={(value) => setTagInput((current) => ({ ...current, excludedIngredients: value }))}
+                onAdd={() => addTag("excludedIngredients")}
+                onRemove={(tag) => removeTag("excludedIngredients", tag)}
               />
-              <label htmlFor="profile-preferences">Предпочтения</label>
-              <input
-                id="profile-preferences"
-                value={draft.preferences.join(", ")}
-                onChange={(event) => saveField("preferences", parseList(event.target.value))}
-                placeholder="белок, меньше готовки"
+              <TagEditor
+                title="Предпочтения"
+                description="Мягкие пожелания для следующих подборок."
+                items={draft.preferences}
+                inputValue={tagInput.preferences}
+                addButtonLabel="Добавить предпочтение"
+                inputLabel="Новое предпочтение"
+                placeholder="больше белка"
+                removeLabel={(tag) => `Удалить предпочтение ${tag}`}
+                onInput={(value) => setTagInput((current) => ({ ...current, preferences: value }))}
+                onAdd={() => addTag("preferences")}
+                onRemove={(tag) => removeTag("preferences", tag)}
               />
+              {(authError || saveError) && <p className="profile-dialog-error" role="alert">{saveError ?? authError}</p>}
             </div>
-            <div className="dialog-actions">
-              <button className="primary-button" type="submit">Сохранить</button>
-              {hasAddress && <button className="secondary-button" type="button" onClick={() => {
-                onChange(DEFAULT_PROFILE);
-                setOpen(false);
-              }}>Очистить</button>}
-              {authConfigured && authStatus === "signedIn" && <button className="secondary-button" type="button" onClick={() => onSignOut()}>Выйти</button>}
-            </div>
+            <footer className="profile-save-bar">
+              <button className="primary-button full" type="submit" disabled={!dirty || saveStatus === "saving"}>{saveStatus === "saving" ? "Сохраняем..." : "Сохранить изменения"}</button>
+            </footer>
           </form>
         </div>
       )}
     </>
   );
+}
+
+function TagEditor({
+  title,
+  description,
+  items,
+  inputValue,
+  addButtonLabel,
+  inputLabel,
+  placeholder,
+  removeLabel,
+  onInput,
+  onAdd,
+  onRemove,
+}: {
+  title: string;
+  description: string;
+  items: string[];
+  inputValue: string;
+  addButtonLabel: string;
+  inputLabel: string;
+  placeholder: string;
+  removeLabel: (tag: string) => string;
+  onInput: (value: string) => void;
+  onAdd: () => void;
+  onRemove: (tag: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const inputId = `${title.toLocaleLowerCase("ru-RU")}-input`;
+
+  return (
+    <section className="profile-section tag-editor" aria-labelledby={`${inputId}-title`}>
+      <div className="profile-section-heading">
+        <div>
+          <h3 id={`${inputId}-title`}>{title}</h3>
+          <p className="profile-dialog-copy">{description}</p>
+        </div>
+        {!adding && <button className="link-button" type="button" onClick={() => setAdding(true)}>{addButtonLabel}</button>}
+      </div>
+      <div className="profile-tags">
+        {items.map((item) => (
+          <span className="profile-tag" key={item}>
+            {item}
+            <button type="button" onClick={() => onRemove(item)} aria-label={removeLabel(item)}><X size={14} /></button>
+          </span>
+        ))}
+        {items.length === 0 && <span className="profile-empty-tags">Пока пусто</span>}
+      </div>
+      {adding && (
+        <div className="tag-input-row">
+          <label className="sr-only" htmlFor={inputId}>{inputLabel}</label>
+          <input
+            id={inputId}
+            value={inputValue}
+            onChange={(event) => onInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onAdd();
+              }
+            }}
+            placeholder={placeholder}
+            autoFocus
+          />
+          <button className="secondary-button" type="button" onClick={onAdd}>Добавить</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const geoStatusCopy = {
+  idle: "",
+  loading: "Определяем геопозицию...",
+  success: "Геопозиция получена. Адрес всё равно лучше уточнить вручную.",
+  denied: "Нет доступа к геопозиции. Введите адрес вручную.",
+  unavailable: "Не удалось определить геопозицию. Введите адрес вручную.",
+};
+
+function peopleLabel(value: number) {
+  const count = Math.min(12, Math.max(1, Math.round(value)));
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${count} человек`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} человека`;
+  return `${count} человек`;
+}
+
+function sameProfile(left: UserProfile, right: UserProfile) {
+  return JSON.stringify(normalizeProfile(left)) === JSON.stringify(normalizeProfile(right));
 }
 
 export function Header({ route }: { route: "home" | "results" }) {

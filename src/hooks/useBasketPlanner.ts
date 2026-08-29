@@ -132,7 +132,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       const fastIntent = state.intent ? applyFastIntentPatch(message, state.intent) : null;
       const intentResult = fastIntent
         ? { data: normalizeBasketIntent(fastIntent), model: "", retryCount: 0, fallbackModelUsed: false, usage: undefined }
-        : (await measureStage(() => analyzeIntent(message, state.intent, basketSummary(selectedVariant(state)), llm, sessionId, controller.signal))).result;
+        : (await measureStage(() => analyzeIntent(message, state.intent, basketSummary(selectedVariant(state)), llm, sessionId, controller.signal, profile))).result;
       metrics.intentMs = fastIntent ? 0 : intentResult.durationMs || 0;
       metrics.intentModel = intentResult.model || undefined;
       metrics.intentPromptTokens = intentResult.usage?.promptTokens;
@@ -379,7 +379,31 @@ const mockCandidateProducts: NormalizedProduct[] = [
   ...mockSpeedItems,
   mockItem("debug-401", "Индейка филе охлаждённое", 279, 2, "Белок", "Замена из найденных товаров"),
   mockItem("debug-402", "Рис жасмин длиннозёрный", 134, 2, "Гарнир", "Замена из найденных товаров"),
-].map(({ quantity: _quantity, role: _role, reason: _reason, ...product }) => product);
+].map(toMockProduct);
+
+function toMockProduct(item: BasketItem): NormalizedProduct {
+  return {
+    id: item.id,
+    xmlId: item.xmlId,
+    retailer: item.retailer,
+    name: item.name,
+    priceRub: item.priceRub,
+    oldPriceRub: item.oldPriceRub,
+    rating: item.rating,
+    reviewsCount: item.reviewsCount,
+    weightLabel: item.weightLabel,
+    imageUrl: item.imageUrl,
+    productUrl: item.productUrl,
+    description: item.description,
+    composition: item.composition,
+    calories: item.calories,
+    proteins: item.proteins,
+    fats: item.fats,
+    carbohydrates: item.carbohydrates,
+    sourceQuery: item.sourceQuery,
+    isDemo: item.isDemo,
+  };
+}
 
 function mockItem(xmlId: string, name: string, priceRub: number, quantity: number, role: string, reason: string): BasketItem {
   return {
