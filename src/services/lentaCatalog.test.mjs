@@ -84,6 +84,28 @@ describe("Lenta catalog adapter", () => {
     });
   });
 
+  it("lists nearby stores for explicit user selection without searching products", async () => {
+    const calls = [];
+    const fetchImpl = async (url) => {
+      calls.push(String(url));
+      if (String(url).includes("nominatim")) return okJson([{ lat: "55.7558", lon: "37.6173" }]);
+      return okJson({ hubs: [
+        { id: 876, aliasId: 1425, name: "ТК1425", address: "Москва, Колодезный переулок, 3", distance: 812 },
+        { id: 3560, name: "ТК1900", address: "Москва, 3-я Владимирская улица, 23", distance: 10823 },
+      ] });
+    };
+    const adapter = createLentaCatalogAdapter({ fetchImpl, logger: () => {} });
+
+    const stores = await adapter.listStores("Москва, Тверская 1");
+
+    expect(stores).toEqual([
+      { id: "1425", name: "ТК1425", address: "Москва, Колодезный переулок, 3", distanceMeters: 812 },
+      { id: "3560", name: "ТК1900", address: "Москва, 3-я Владимирская улица, 23", distanceMeters: 10823 },
+    ]);
+    expect(calls).toHaveLength(2);
+    expect(calls.some((url) => url.includes("/catalog/v1/items"))).toBe(false);
+  });
+
   it("uses the last valid product cache when Lenta API becomes unavailable", async () => {
     let nowMs = 1_000;
     let itemsCalls = 0;

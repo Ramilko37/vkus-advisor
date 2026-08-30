@@ -72,7 +72,7 @@ export function createLentaCatalogAdapter(options = {}) {
   const productCache = options.productCache || new Map();
   const storeCache = options.storeCache || new Map();
   let currentStoreId = stringValue(options.storeId) || "";
-  let candidateStores = currentStoreId ? [{ id: currentStoreId }] : [];
+  let candidateStores = currentStoreId ? [{ id: currentStoreId, name: stringValue(options.storeName), address: stringValue(options.storeAddress) }] : [];
   let candidateStoreIds = currentStoreId ? [currentStoreId] : [];
 
   async function ensureStore(address = "") {
@@ -112,6 +112,16 @@ export function createLentaCatalogAdapter(options = {}) {
     const latitude = numberValue(first?.lat);
     const longitude = numberValue(first?.lon);
     return latitude && longitude ? { latitude, longitude } : null;
+  }
+
+  async function listStores(address = "") {
+    await ensureStore(address);
+    return candidateStores.slice(0, 4).map((store) => ({
+      id: store.id,
+      name: stringValue(store.name),
+      address: stringValue(store.address),
+      distanceMeters: firstNumber(store.distance),
+    }));
   }
 
   async function searchProducts(query, address = "") {
@@ -205,6 +215,7 @@ export function createLentaCatalogAdapter(options = {}) {
     channel,
     retailBrand,
     ensureStore,
+    listStores,
     get currentStoreId() { return currentStoreId; },
     hasStore: () => Boolean(currentStoreId),
     searchProducts,
@@ -320,7 +331,7 @@ function extractLentaStores(payload) {
     : stores;
   return (Array.isArray(sorted) ? sorted : [sorted])
     .map((store) => {
-      const id = stringValue(store?.id ?? store?.storeId ?? store?.store_id);
+      const id = stringValue(store?.aliasId ?? store?.id ?? store?.storeId ?? store?.store_id);
       return id ? { ...store, id } : null;
     })
     .filter(Boolean);

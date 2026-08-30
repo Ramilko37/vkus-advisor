@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, NormalizedProduct, PipelineMetrics, RetailerResult, UserProfile, WorkflowStage } from "../types/domain";
+import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, CheckoutResult, NormalizedProduct, PipelineMetrics, RetailerResult, UserProfile, WorkflowStage } from "../types/domain";
 import { analyzeIntent, basketSummary, composeBaskets } from "../services/basketOrchestrator";
 import { BrowserLlmClient, LlmProviderError, getSessionId } from "../services/openRouterClient";
 import { createCatalogClient } from "../services/catalog";
@@ -199,17 +199,25 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true }, pendingMessage: trimmed });
       return;
     }
+    if (!profile.lentaStoreId) {
+      dispatch({ type: "error", error: { source: "validation", code: "missing_lenta_store", message: "Выберите магазин Ленты в профиле перед поиском.", recoverable: true }, pendingMessage: trimmed });
+      return;
+    }
     dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "user", content: trimmed, createdAt: Date.now() } });
     await runWorkflow(trimmed);
-  }, [profile.address, runWorkflow, state.intent]);
+  }, [profile.address, profile.lentaStoreId, runWorkflow, state.intent]);
 
   const retry = useCallback(() => {
     if (!profile.address.trim()) {
       dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true } });
       return;
     }
+    if (!profile.lentaStoreId) {
+      dispatch({ type: "error", error: { source: "validation", code: "missing_lenta_store", message: "Выберите магазин Ленты в профиле перед поиском.", recoverable: true } });
+      return;
+    }
     if (state.pendingMessage) void runWorkflow(state.pendingMessage);
-  }, [profile.address, runWorkflow, state.pendingMessage]);
+  }, [profile.address, profile.lentaStoreId, runWorkflow, state.pendingMessage]);
 
   const reconnectCatalog = useCallback(async () => {
     dispatch({ type: "catalog", mode: "connecting" });
@@ -226,9 +234,10 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
     dispatch({ type: "ready", intent: mockIntent, variants: mockVariants, retailerResults: retailerResultsFromVariants(mockVariants), models: ["debug/mock"] });
   }, [profile.address]);
 
-  const createCart = useCallback(async () => {
+  const createCart = useCallback(async (): Promise<CheckoutResult | null> => {
     const variant = selectedVariant(state);
     if (!variant) return null;
+    const isLenta = variant.retailer === "lenta" || variant.items.every((item) => item.retailer === "lenta");
     try {
       let catalog = catalogRef.current;
       const catalogKey = profileCatalogKey(profile);
@@ -241,11 +250,24 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       }
       if (catalog.mode === "demo") return null;
       dispatch({ type: "stage", stage: "creatingCart" });
+      if (isLenta) {
+        if (!catalog.validateBasketItems) throw new Error("Lenta basket validation is unavailable");
+        const validation = await catalog.validateBasketItems(variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity, priceRub: item.priceRub })));
+        if (validation.unavailableXmlIds.length > 0) throw new Error("Some Lenta basket items are unavailable");
+        const products = new Map(validation.products.map((product) => [product.xmlId, product]));
+        const items = variant.items.map((item) => {
+          const product = products.get(item.xmlId);
+          return product ? { ...item, ...product, quantity: item.quantity, role: item.role, reason: item.reason } : item;
+        });
+        dispatch({ type: "items", id: variant.id, items });
+        dispatch({ type: "stage", stage: "ready" });
+        return { url: "https://lenta.com/basket/", items };
+      }
       const url = await catalog.createCartLink(variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity })));
       dispatch({ type: "stage", stage: "ready" });
-      return url;
+      return { url };
     } catch {
-      dispatch({ type: "error", error: { source: "mcp", code: "cart", message: "Не удалось создать ссылку. Список товаров можно скопировать и использовать вручную.", recoverable: true } });
+      dispatch({ type: "error", error: { source: "mcp", code: "cart", message: isLenta ? "Не удалось проверить товары Ленты. Обновите корзину или попробуйте позже." : "Не удалось создать ссылку. Список товаров можно скопировать и использовать вручную.", recoverable: true } });
       return null;
     }
   }, [profile, state]);
@@ -338,7 +360,7 @@ async function getCatalogForProfile(
 }
 
 function profileCatalogKey(profile: UserProfile) {
-  return profile.address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ");
+  return `${profile.address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ")}:${profile.lentaStoreId || ""}`;
 }
 
 function isStaleRetailerResult(state: { catalogMode?: PlannerState["catalogMode"]; variants?: BasketVariant[]; retailerResults?: RetailerResult[] }) {

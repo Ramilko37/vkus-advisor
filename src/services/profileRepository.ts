@@ -14,6 +14,9 @@ interface ProfileRow {
   user_id: string;
   email: string | null;
   address: string;
+  lenta_store_id: string | null;
+  lenta_store_name: string | null;
+  lenta_store_address: string | null;
   household_size: number;
   excluded_ingredients: string[];
   preferences: string[];
@@ -46,7 +49,7 @@ export async function loadRemoteProfile(userId: string, client = getSupabaseClie
   if (!client) return null;
   const { data, error } = await client
     .from("profiles")
-    .select("user_id,email,address,household_size,excluded_ingredients,preferences")
+    .select("user_id,email,address,lenta_store_id,lenta_store_name,lenta_store_address,household_size,excluded_ingredients,preferences")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
@@ -59,17 +62,23 @@ export async function upsertRemoteProfile(profile: UserProfile, client = getSupa
   const { data, error } = await client
     .from("profiles")
     .upsert(row, { onConflict: "user_id" })
-    .select("user_id,email,address,household_size,excluded_ingredients,preferences")
+    .select("user_id,email,address,lenta_store_id,lenta_store_name,lenta_store_address,household_size,excluded_ingredients,preferences")
     .single();
   if (error) throw error;
   return fromRow(data as ProfileRow);
 }
 
 export function normalizeProfile(profile: Partial<UserProfile>): UserProfile {
+  const lentaStoreId = textOrUndefined(profile.lentaStoreId);
   return {
     userId: textOrUndefined(profile.userId),
     email: textOrUndefined(profile.email),
     address: cleanText(profile.address),
+    ...(lentaStoreId ? {
+      lentaStoreId,
+      lentaStoreName: textOrUndefined(profile.lentaStoreName),
+      lentaStoreAddress: textOrUndefined(profile.lentaStoreAddress),
+    } : {}),
     householdSize: clampNumber(profile.householdSize, 1, 12, DEFAULT_PROFILE.householdSize),
     excludedIngredients: cleanList(profile.excludedIngredients),
     preferences: cleanList(profile.preferences),
@@ -81,6 +90,9 @@ function fromRow(row: ProfileRow): UserProfile {
     userId: row.user_id,
     email: row.email ?? undefined,
     address: row.address,
+    lentaStoreId: row.lenta_store_id ?? undefined,
+    lentaStoreName: row.lenta_store_name ?? undefined,
+    lentaStoreAddress: row.lenta_store_address ?? undefined,
     householdSize: row.household_size,
     excludedIngredients: row.excluded_ingredients,
     preferences: row.preferences,
@@ -92,6 +104,9 @@ function toRow(profile: UserProfile): ProfileRow {
     user_id: profile.userId || "",
     email: profile.email || null,
     address: profile.address,
+    lenta_store_id: profile.lentaStoreId || null,
+    lenta_store_name: profile.lentaStoreName || null,
+    lenta_store_address: profile.lentaStoreAddress || null,
     household_size: profile.householdSize,
     excluded_ingredients: profile.excludedIngredients,
     preferences: profile.preferences,

@@ -27,6 +27,7 @@ export const basketItemRoleSchema = z.enum(["breakfast", "main", "protein", "sid
 export const basketReasonCodeSchema = z.enum(["good_value", "versatile", "high_protein", "quick", "ready_to_eat", "breakfast_fit", "adds_variety", "budget_fit", "family_fit", "requested_by_user"]);
 
 export const basketVariantDraftSchema = z.object({
+  retailer: z.enum(["vkusvill", "lenta", "pyaterochka", "demo"]),
   strategy: z.enum(["balanced", "budget", "speed"]),
   items: z.array(z.object({
     xmlId: z.string().min(1).max(64),
@@ -37,7 +38,7 @@ export const basketVariantDraftSchema = z.object({
 }).strict();
 
 export const basketDraftResponseSchema = z.object({
-  variants: z.array(basketVariantDraftSchema).length(3),
+  variants: z.array(basketVariantDraftSchema).min(3).max(9),
 }).strict();
 
 export const basketIntentJsonSchema = {
@@ -79,12 +80,13 @@ export const basketDraftJsonSchema = {
     variants: {
       type: "array",
       minItems: 3,
-      maxItems: 3,
+      maxItems: 9,
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["strategy", "items"],
+        required: ["retailer", "strategy", "items"],
         properties: {
+          retailer: { type: "string", enum: ["vkusvill", "lenta", "pyaterochka", "demo"] },
           strategy: { type: "string", enum: ["balanced", "budget", "speed"] },
           items: {
             type: "array",

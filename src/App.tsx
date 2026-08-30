@@ -68,7 +68,7 @@ export function App() {
             <EmptyResultsState onStart={openHome} />
           )
         ) : (
-          <ConversationPanel planner={planner} />
+          <ConversationPanel planner={planner} hasDeliveryAddress={Boolean(authProfile.profile.address.trim())} hasLentaStore={Boolean(authProfile.profile.lentaStoreId)} />
         )}
       </AppShell>
       {loading && <FullscreenLoader stage={planner.state.stage} intent={planner.state.intent} onCancel={planner.cancel} />}

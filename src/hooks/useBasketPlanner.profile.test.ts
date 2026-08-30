@@ -65,8 +65,24 @@ describe("useBasketPlanner profile", () => {
     expect(mocks.createCatalogClient).not.toHaveBeenCalled();
   });
 
+  it("requires a selected Lenta store before starting the workflow", async () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Вавилова 19" };
+    const { result } = renderHook(() => useBasketPlanner(profile));
+
+    await act(async () => {
+      await result.current.submit("на 3 дня для двоих до 3000");
+    });
+
+    expect(result.current.state.stage).toBe("error");
+    expect(result.current.state.error).toEqual(expect.objectContaining({
+      code: "missing_lenta_store",
+      message: "Выберите магазин Ленты в профиле перед поиском.",
+    }));
+    expect(mocks.createCatalogClient).not.toHaveBeenCalled();
+  });
+
   it("recreates cached catalog client when delivery address changes", async () => {
-    const profile = { ...DEFAULT_PROFILE, address: "Москва, старая 1" };
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, старая 1", lentaStoreId: "525" };
     const intent = testIntent();
     const oldProducts = testProducts("vkusvill");
     const newProducts = testProducts("lenta");
@@ -106,6 +122,69 @@ describe("useBasketPlanner profile", () => {
     expect(mocks.createCatalogClient).toHaveBeenCalledTimes(2);
     expect(result.current.state.retailerResults).toContainEqual(expect.objectContaining({ retailer: "lenta", status: "ready" }));
     expect(result.current.state.variants.map((variant) => variant.retailer)).toEqual(["lenta", "lenta", "lenta"]);
+  });
+
+  it("validates a Lenta basket and returns its refreshed list without creating a VkusVill cart", async () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1", lentaStoreId: "525" };
+    const item = {
+      id: "lenta:100",
+      xmlId: "lenta:100",
+      retailer: "lenta" as const,
+      name: "Молоко Лента",
+      priceRub: 100,
+      sourceQuery: "молоко",
+      isDemo: false,
+      quantity: 2,
+      role: "breakfast",
+      reason: "Подходит под запрос",
+    };
+    sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
+      schemaVersion: 10,
+      intent: testIntent(),
+      variants: [{
+        id: "lenta:balanced",
+        retailer: "lenta",
+        strategy: "balanced",
+        title: "Сбалансированная",
+        summary: "",
+        tradeoffs: [],
+        items: [item],
+        totalRub: 200,
+        uniqueItemsCount: 1,
+        warnings: [],
+      }],
+      retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 1 }],
+      selectedId: "lenta:balanced",
+      catalogMode: "live",
+      modelNames: [],
+    }));
+    const validateBasketItems = vi.fn().mockResolvedValue({
+      products: [{ ...item, priceRub: 125, quantity: undefined, role: undefined, reason: undefined }],
+      unavailableXmlIds: [],
+      changedPrices: [{ xmlId: item.xmlId, oldPriceRub: 100, newPriceRub: 125 }],
+    });
+    const createCartLink = vi.fn();
+    mocks.createCatalogClient.mockResolvedValue({
+      mode: "live",
+      searchProducts: vi.fn(),
+      getProductDetails: vi.fn(),
+      validateBasketItems,
+      createCartLink,
+    });
+
+    const { result } = renderHook(() => useBasketPlanner(profile));
+    let checkout: Awaited<ReturnType<typeof result.current.createCart>>;
+    await act(async () => {
+      checkout = await result.current.createCart();
+    });
+
+    expect(validateBasketItems).toHaveBeenCalledWith([{ xmlId: "lenta:100", quantity: 2, priceRub: 100 }]);
+    expect(createCartLink).not.toHaveBeenCalled();
+    expect(checkout!).toEqual({
+      url: "https://lenta.com/basket/",
+      items: [expect.objectContaining({ xmlId: "lenta:100", quantity: 2, priceRub: 125, role: "breakfast", reason: "Подходит под запрос" })],
+    });
+    expect(result.current.state.variants[0].totalRub).toBe(250);
   });
 
   it("ignores saved results from stale schemas", () => {

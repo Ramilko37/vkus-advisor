@@ -1,11 +1,14 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BasketResults, ConversationPanel, Header, ProfileControl } from "./components";
+import { BasketResults, ConversationPanel, Header, ProfileControl, SelectedBasketActions } from "./components";
 import { DEFAULT_PROFILE } from "./services/profileRepository";
 import type { BasketPriority, BasketVariant, NormalizedProduct } from "./types/domain";
 
 describe("ProfileControl", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it("keeps the profile focused on auth, address, household and stable tags", () => {
     const onChange = vi.fn();
@@ -34,9 +37,16 @@ describe("ProfileControl", () => {
 
   it("saves guest address, household and tag defaults", () => {
     const onChange = vi.fn();
+    const profile = {
+      ...DEFAULT_PROFILE,
+      address: "Москва, Тверская 1",
+      lentaStoreId: "525",
+      lentaStoreName: "ТК1453",
+      lentaStoreAddress: "Москва, Овчинниковская наб., 22/24с1",
+    };
     render(
       <ProfileControl
-        profile={DEFAULT_PROFILE}
+        profile={profile}
         authConfigured={false}
         authStatus="guest"
         authError={null}
@@ -46,8 +56,7 @@ describe("ProfileControl", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
-    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: " Москва, Тверская 1 " } });
+    fireEvent.click(screen.getByRole("button", { name: "Адрес: Москва, Тверская 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Увеличить количество людей" }));
     fireEvent.click(screen.getByRole("button", { name: "Добавить ограничение" }));
     fireEvent.change(screen.getByLabelText("Новое ограничение"), { target: { value: " грибы " } });
@@ -63,6 +72,48 @@ describe("ProfileControl", () => {
       excludedIngredients: ["грибы"],
       preferences: ["больше белка"],
     }));
+  });
+
+  it("requires selecting a nearby Lenta store before saving an address", async () => {
+    const onChange = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        stores: [
+          { id: "525", name: "ТК1453", address: "Москва, Овчинниковская наб., 22/24с1", distanceMeters: 1127 },
+          { id: "3560", name: "ТК1900", address: "Москва, 3-я Владимирская улица, 23", distanceMeters: 10823 },
+        ],
+      }),
+    }));
+    render(
+      <ProfileControl
+        profile={DEFAULT_PROFILE}
+        authConfigured={false}
+        authStatus="guest"
+        authError={null}
+        onChange={onChange}
+        onSendOtp={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Тверская 1" } });
+
+    expect(screen.getByRole("button", { name: "Сохранить изменения" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Найти магазины Ленты" }));
+    const store = await screen.findByRole("radio", { name: /ТК1453/ });
+    fireEvent.click(store);
+    expect(screen.getByRole("button", { name: "Сохранить изменения" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      address: "Москва, Тверская 1",
+      lentaStoreId: "525",
+      lentaStoreName: "ТК1453",
+      lentaStoreAddress: "Москва, Овчинниковская наб., 22/24с1",
+    })));
   });
 
   it("shows Email OTP entry when Supabase auth is configured", () => {
@@ -102,9 +153,51 @@ describe("Header", () => {
 describe("ConversationPanel", () => {
   afterEach(() => cleanup());
 
+  it("requires a delivery address before enabling basket search", () => {
+    const submit = vi.fn();
+    render(
+      <ConversationPanel
+        hasDeliveryAddress={false}
+        hasLentaStore={false}
+        planner={{
+          state: {
+            stage: "idle",
+            messages: [],
+            intent: null,
+            variants: [],
+            selectedId: null,
+            error: null,
+            catalogMode: "live",
+            modelNames: [],
+            pendingMessage: null,
+          },
+          submit,
+          retry: vi.fn(),
+          reconnectCatalog: vi.fn(),
+          mockResults: vi.fn(),
+          createCart: vi.fn(),
+          cancel: vi.fn(),
+          replaceItem: vi.fn(),
+          selectVariant: vi.fn(),
+          clearVariantSelection: vi.fn(),
+          updateItems: vi.fn(),
+        } as never}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Что собрать?"), { target: { value: "ужины на три дня" } });
+
+    expect(screen.getByText("Сначала добавьте адрес доставки в профиле — без него поиск недоступен.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Сначала добавьте адрес доставки" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Сначала добавьте адрес доставки" }));
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("adds grocery category shortcuts to the request", () => {
     render(
       <ConversationPanel
+        hasDeliveryAddress
+        hasLentaStore
         planner={{
           state: {
             stage: "idle",
@@ -277,6 +370,41 @@ describe("BasketResults", () => {
 
     expect(screen.getByText("Не удалось собрать три валидные корзины.")).toBeInTheDocument();
     expect(screen.getByText("Кандидатов: 16")).toBeInTheDocument();
+  });
+});
+
+describe("SelectedBasketActions", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("copies the refreshed Lenta list and offers the official Lenta basket after validation", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const variant = makeVariant("lenta", "balanced", "Молоко Лента");
+    variant.items[0].quantity = 2;
+    variant.totalRub = 200;
+    const refreshedItem = { ...variant.items[0], priceRub: 125 };
+
+    render(
+      <SelectedBasketActions
+        variant={variant}
+        variants={[variant]}
+        mode="live"
+        creating={false}
+        onItems={vi.fn()}
+        onReplace={vi.fn()}
+        onCreateCart={vi.fn().mockResolvedValue({ url: "https://lenta.com/basket/", items: [refreshedItem] })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Проверить список Ленты" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("2 × Молоко Лента — 250 ₽"));
+    expect(screen.getByRole("status")).toHaveTextContent("Список проверен и скопирован");
+    expect(screen.getByRole("link", { name: "Открыть Ленту" })).toHaveAttribute("href", "https://lenta.com/basket/");
+    expect(screen.queryByText("Открыть во ВкусВилл")).not.toBeInTheDocument();
   });
 });
 

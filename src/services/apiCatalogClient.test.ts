@@ -40,6 +40,30 @@ describe("ApiCatalogClient", () => {
     });
   });
 
+  it("uses the catalog alias from the selected Lenta store name for legacy profiles", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ mode: "live", products: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiCatalogClient({
+      ...DEFAULT_PROFILE,
+      address: "Москва, улица Вавилова, 19",
+      lentaStoreId: "876",
+      lentaStoreName: "ТК1425",
+      lentaStoreAddress: "Москва, Колодезный переулок, 3",
+    });
+    await client.searchProducts({ query: "молоко", purpose: "завтрак", sort: "popularity" });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      lentaStoreId: "1425",
+      lentaStoreName: "ТК1425",
+      lentaStoreAddress: "Москва, Колодезный переулок, 3",
+    });
+  });
+
   it("passes profile address to basket validation", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

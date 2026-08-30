@@ -1,9 +1,10 @@
 import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Gift, Heart, Home, Loader2, MapPin, Menu, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import type { BasketItem, BasketVariant, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
+import type { BasketItem, BasketVariant, CheckoutResult, LentaStore, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
 import type { AuthStatus } from "./hooks/useAuthProfile";
 import { normalizeProfile } from "./services/profileRepository";
+import { findLentaStores } from "./services/catalog";
 import { getVariantPresentation } from "./services/variantPresentation";
 import { summarizeIntentSlots } from "./services/requestCopy";
 
@@ -122,6 +123,8 @@ export function ProfileControl({
   const [geoStatus, setGeoStatus] = useState<"idle" | "loading" | "success" | "denied" | "unavailable">("idle");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [lentaStores, setLentaStores] = useState<LentaStore[]>([]);
+  const [storeStatus, setStoreStatus] = useState<"idle" | "loading" | "ready" | "empty" | "error">("idle");
   const [toast, setToast] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLFormElement>(null);
@@ -142,6 +145,11 @@ export function ProfileControl({
       setSaveError("Адрес выглядит слишком коротким. Укажите город, улицу и дом.");
       return;
     }
+    if (nextProfile.address && !nextProfile.lentaStoreId) {
+      setSaveStatus("error");
+      setSaveError("Выберите магазин Ленты для этого адреса.");
+      return;
+    }
     setSaveStatus("saving");
     setSaveError(null);
     try {
@@ -157,6 +165,34 @@ export function ProfileControl({
   };
   const saveField = <K extends keyof UserProfile>(key: K, value: UserProfile[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
+  };
+  const changeAddress = (address: string) => {
+    setDraft((current) => ({ ...current, address, lentaStoreId: undefined, lentaStoreName: undefined, lentaStoreAddress: undefined }));
+    setLentaStores([]);
+    setStoreStatus("idle");
+    setSaveError(null);
+  };
+  const loadLentaStores = async () => {
+    const address = normalizedDraft.address;
+    if (address.length < 5) {
+      setStoreStatus("error");
+      setSaveError("Сначала укажите город, улицу и дом.");
+      return;
+    }
+    setStoreStatus("loading");
+    setSaveError(null);
+    try {
+      const stores = await findLentaStores(address);
+      setLentaStores(stores);
+      setStoreStatus(stores.length ? "ready" : "empty");
+    } catch {
+      setStoreStatus("error");
+      setSaveError("Не удалось найти магазины Ленты. Проверьте адрес и повторите.");
+    }
+  };
+  const selectLentaStore = (store: LentaStore) => {
+    setDraft((current) => ({ ...current, lentaStoreId: store.id, lentaStoreName: store.name, lentaStoreAddress: store.address }));
+    setSaveError(null);
   };
   const setHousehold = (value: number) => saveField("householdSize", Math.min(12, Math.max(1, value)));
   const addTag = (key: "excludedIngredients" | "preferences") => {
@@ -208,6 +244,8 @@ export function ProfileControl({
       setGeoStatus("idle");
       setSaveStatus("idle");
       setSaveError(null);
+      setLentaStores([]);
+      setStoreStatus("idle");
     }
   }, [open, profile]);
 
@@ -260,11 +298,37 @@ export function ProfileControl({
                 <input
                   id="profile-address"
                   value={draft.address}
-                  onChange={(event) => saveField("address", event.target.value)}
+                  onChange={(event) => changeAddress(event.target.value)}
                   placeholder="Москва, улица, дом"
                   autoComplete="street-address"
                   autoFocus
                 />
+                {draft.lentaStoreId && (
+                  <div className="profile-selected-store">
+                    <strong>{draft.lentaStoreName || "Магазин Ленты"}</strong>
+                    {draft.lentaStoreAddress && <span>{draft.lentaStoreAddress}</span>}
+                  </div>
+                )}
+                <button className="secondary-button profile-location-button" type="button" onClick={() => void loadLentaStores()} disabled={storeStatus === "loading" || normalizedDraft.address.length < 5}>
+                  {storeStatus === "loading" ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
+                  {storeStatus === "loading" ? "Ищем магазины..." : "Найти магазины Ленты"}
+                </button>
+                {storeStatus === "empty" && <p className="profile-dialog-copy" role="status">Для этого адреса магазины Ленты не найдены.</p>}
+                {lentaStores.length > 0 && (
+                  <fieldset className="lenta-store-list">
+                    <legend>Выберите магазин Ленты</legend>
+                    {lentaStores.map((store) => (
+                      <label key={store.id} className="lenta-store-option">
+                        <input type="radio" name="lenta-store" checked={draft.lentaStoreId === store.id} onChange={() => selectLentaStore(store)} />
+                        <span>
+                          <strong>{store.name || "Магазин Ленты"}</strong>
+                          {store.address && <small>{store.address}</small>}
+                          {typeof store.distanceMeters === "number" && <small>{formatDistance(store.distanceMeters)}</small>}
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
                 <button className="secondary-button profile-location-button" type="button" onClick={detectLocation} disabled={geoStatus === "loading"}>
                   {geoStatus === "loading" ? <Loader2 className="spin" size={17} /> : <MapPin size={17} />}
                   Определить автоматически
@@ -311,7 +375,7 @@ export function ProfileControl({
               {(authError || saveError) && <p className="profile-dialog-error" role="alert">{saveError ?? authError}</p>}
             </div>
             <footer className="profile-save-bar">
-              <button className="primary-button full" type="submit" disabled={!dirty || saveStatus === "saving"}>{saveStatus === "saving" ? "Сохраняем..." : "Сохранить изменения"}</button>
+              <button className="primary-button full" type="submit" disabled={!dirty || saveStatus === "saving" || Boolean(normalizedDraft.address && !normalizedDraft.lentaStoreId)}>{saveStatus === "saving" ? "Сохраняем..." : "Сохранить изменения"}</button>
             </footer>
           </form>
         </div>
@@ -406,6 +470,10 @@ function peopleLabel(value: number) {
   return `${count} человек`;
 }
 
+function formatDistance(distanceMeters: number) {
+  return distanceMeters < 1000 ? `${Math.round(distanceMeters)} м` : `${(distanceMeters / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} км`;
+}
+
 function sameProfile(left: UserProfile, right: UserProfile) {
   return JSON.stringify(normalizeProfile(left)) === JSON.stringify(normalizeProfile(right));
 }
@@ -435,7 +503,7 @@ export function Header({ route }: { route: "home" | "results" }) {
   );
 }
 
-export function ConversationPanel({ planner }: { planner: Planner }) {
+export function ConversationPanel({ planner, hasDeliveryAddress, hasLentaStore }: { planner: Planner; hasDeliveryAddress: boolean; hasLentaStore: boolean }) {
   const [text, setText] = useState("");
   const showMessages = planner.state.messages.length > 1 || planner.state.stage === "clarifying" || planner.state.stage === "error";
   const busy = ["analyzing", "searching", "composing", "creatingCart"].includes(planner.state.stage);
@@ -447,7 +515,7 @@ export function ConversationPanel({ planner }: { planner: Planner }) {
   return (
     <section className="conversation-panel kit-home" aria-label="Подбор корзины" data-od-id="conversation-panel">
       {showMessages && <MessageList messages={planner.state.messages} />}
-      <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} />
+      <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} hasDeliveryAddress={hasDeliveryAddress} hasLentaStore={hasLentaStore} />
       <CategoryShortcuts onPick={(fragment) => setText((current) => appendBriefFragment(current, fragment))} />
       <IntentChips intent={planner.state.intent} />
       {planner.state.error && <ErrorNotice message={planner.state.error.message} onRetry={planner.retry} />}
@@ -558,10 +626,10 @@ export function PromptExamples({ onPick }: { onPick: (value: string) => void }) 
   );
 }
 
-export function ChatComposer({ value, onChange, onSubmit, busy }: { value: string; onChange: (value: string) => void; onSubmit: () => void; busy: boolean }) {
+export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddress, hasLentaStore }: { value: string; onChange: (value: string) => void; onSubmit: () => void; busy: boolean; hasDeliveryAddress: boolean; hasLentaStore: boolean }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasText = value.trim().length > 0;
-  const canSubmit = hasText && !busy;
+  const canSubmit = hasText && hasDeliveryAddress && hasLentaStore && !busy;
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!canSubmit) return;
@@ -582,7 +650,7 @@ export function ChatComposer({ value, onChange, onSubmit, busy }: { value: strin
     <form className="composer vv-chat-composer liquid-glass" onSubmit={handleSubmit}>
       <div className="composer-head">
         <label htmlFor="basket-request">Что собрать?</label>
-        <p id="basket-request-hint">Добавьте срок, людей, бюджет или ограничения.</p>
+        <p id="basket-request-hint">{!hasDeliveryAddress ? "Сначала добавьте адрес доставки в профиле — без него поиск недоступен." : !hasLentaStore ? "Выберите магазин Ленты в профиле — без него поиск недоступен." : "Добавьте срок, людей, бюджет или ограничения."}</p>
       </div>
       <div className="brief-chips" aria-label="Быстро добавить параметры">
         {briefChips.map((chip) => (
@@ -602,9 +670,9 @@ export function ChatComposer({ value, onChange, onSubmit, busy }: { value: strin
           rows={3}
           aria-describedby="basket-request-hint"
         />
-        <button type="submit" disabled={busy || !hasText} aria-label={hasText ? "Подобрать 3 корзины" : "Введите задачу для подбора"} aria-keyshortcuts="Control+Enter Meta+Enter">
+        <button type="submit" disabled={!canSubmit} aria-label={!hasDeliveryAddress ? "Сначала добавьте адрес доставки" : !hasLentaStore ? "Сначала выберите магазин Ленты" : hasText ? "Подобрать 3 корзины" : "Введите задачу для подбора"} aria-keyshortcuts="Control+Enter Meta+Enter">
           {busy ? <Loader2 className="spin" size={18} /> : <ShoppingBasket size={18} />}
-          <span>{busy ? "Собираем..." : "Подобрать 3 корзины"}</span>
+          <span>{busy ? "Собираем..." : !hasDeliveryAddress ? "Добавьте адрес" : !hasLentaStore ? "Выберите Ленту" : "Подобрать 3 корзины"}</span>
         </button>
       </div>
     </form>
@@ -855,12 +923,28 @@ function ProductThumb({ item }: { item: BasketItem }) {
   );
 }
 
-export function SelectedBasketActions({ variant, variants, mode, creating, onItems, onReplace, onCreateCart }: { variant: BasketVariant; variants: BasketVariant[]; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onReplace: (xmlId: string) => void; onCreateCart: () => Promise<string | null> }) {
+export function SelectedBasketActions({ variant, variants, mode, creating, onItems, onReplace, onCreateCart }: { variant: BasketVariant; variants: BasketVariant[]; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onReplace: (xmlId: string) => void; onCreateCart: () => Promise<CheckoutResult | null> }) {
   const [cartUrl, setCartUrl] = useState<string | null>(null);
+  const [lentaCopyStatus, setLentaCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [removed, setRemoved] = useState<BasketItem | null>(null);
   const presentation = getVariantPresentation(variant, variants);
-  const list = useMemo(() => variant.items.map((item) => `${item.quantity} × ${item.name} — ${Math.round(item.priceRub * item.quantity)} ₽`).join("\n"), [variant.items]);
+  const retailer = variant.retailer ?? variant.items[0]?.retailer;
+  const isLenta = retailer === "lenta";
+  const list = useMemo(() => formatBasketList(variant.items), [variant.items]);
   const copy = () => void navigator.clipboard.writeText(list);
+  const checkout = async () => {
+    const result = await onCreateCart();
+    if (!result) return;
+    if (isLenta) {
+      try {
+        await navigator.clipboard.writeText(formatBasketList(result.items ?? variant.items));
+        setLentaCopyStatus("copied");
+      } catch {
+        setLentaCopyStatus("failed");
+      }
+    }
+    setCartUrl(result.url);
+  };
   const update = (xmlId: string, quantity: number) => onItems(variant.items.map((item) => item.xmlId === xmlId ? { ...item, quantity: Math.min(9, Math.max(1, quantity)) } : item));
   const remove = (item: BasketItem) => {
     setRemoved(item);
@@ -900,6 +984,11 @@ export function SelectedBasketActions({ variant, variants, mode, creating, onIte
             {variant.warnings.map((warning) => <li key={warning}>{warning}</li>)}
           </ul>
         )}
+        {isLenta && lentaCopyStatus !== "idle" && (
+          <p className="demo-note" role="status">
+            {lentaCopyStatus === "copied" ? "Список проверен и скопирован. В Ленте добавьте товары вручную." : "Список проверен. Скопируйте его кнопкой выше и добавьте товары в Ленте вручную."}
+          </p>
+        )}
         {mode === "demo" && <p className="demo-note">Это пример корзины: цены и товары нужны для ориентира. Список можно скопировать.</p>}
       </section>
       <CheckoutBar
@@ -908,7 +997,8 @@ export function SelectedBasketActions({ variant, variants, mode, creating, onIte
         mode={mode}
         creating={creating}
         cartUrl={cartUrl}
-        onCreateCart={async () => setCartUrl(await onCreateCart())}
+        retailer={retailer}
+        onCreateCart={checkout}
       />
     </>
   );
@@ -940,8 +1030,9 @@ function BottomNav({ route }: { route: "home" | "results" }) {
   );
 }
 
-function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, onCreateCart }: { totalRub: number; itemCount: number; mode: "live" | "demo" | "connecting"; creating: boolean; cartUrl: string | null; onCreateCart: () => Promise<void> }) {
+function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, retailer, onCreateCart }: { totalRub: number; itemCount: number; mode: "live" | "demo" | "connecting"; creating: boolean; cartUrl: string | null; retailer?: BasketVariant["retailer"]; onCreateCart: () => Promise<void> }) {
   const label = `${totalRub.toLocaleString("ru-RU")} ₽`;
+  const isLenta = retailer === "lenta";
 
   return (
     <div className="checkout-bar vv-checkout-bar liquid-glass">
@@ -950,16 +1041,20 @@ function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, onCreateCar
         <span>{itemCount} позиций</span>
       </div>
       {mode === "demo" ? (
-        <button className="primary-button checkout-button" type="button" disabled>ВкусВилл недоступен</button>
+        <button className="primary-button checkout-button" type="button" disabled>{isLenta ? "Лента недоступна" : "ВкусВилл недоступен"}</button>
       ) : cartUrl ? (
-        <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> Открыть во ВкусВилл</a>
+        <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> {isLenta ? "Открыть Ленту" : "Открыть во ВкусВилл"}</a>
       ) : (
         <button className="primary-button checkout-button" type="button" disabled={creating} onClick={onCreateCart}>
-          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} Открыть во ВкусВилл
+          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} {isLenta ? "Проверить список Ленты" : "Открыть во ВкусВилл"}
         </button>
       )}
     </div>
   );
+}
+
+function formatBasketList(items: BasketItem[]) {
+  return items.map((item) => `${item.quantity} × ${item.name} — ${Math.round(item.priceRub * item.quantity)} ₽`).join("\n");
 }
 
 export function ErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {

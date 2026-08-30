@@ -53,7 +53,7 @@ let pyaterochkaStoreId = "";
 let pyaterochkaStoreAddress = "";
 let pyaterochkaUnavailableUntil = 0;
 let lentaAdapter = null;
-let lentaAdapterAddress = "";
+let lentaAdapterKey = "";
 let catalogMode = "demo";
 const searchCache = new Map();
 const detailsCache = new Map();
@@ -81,6 +81,7 @@ export async function handleRequest(req, res) {
     if (url.pathname === "/api/llm" && req.method === "POST") return await handleLlm(req, res);
     if (url.pathname === "/api/openrouter" && req.method === "POST") return await handleOpenRouter(req, res);
     if (url.pathname === "/api/catalog/status") return await handleCatalogStatus(res);
+    if (url.pathname === "/api/catalog/lenta/stores" && req.method === "POST") return await handleLentaStores(req, res);
     if (url.pathname === "/api/catalog/search" && req.method === "POST") return await handleCatalogSearch(req, res);
     if (url.pathname === "/api/catalog/details") return await handleCatalogDetails(url, res);
     if (url.pathname === "/api/catalog/validate" && req.method === "POST") return await handleCatalogValidate(req, res);
@@ -491,6 +492,7 @@ function catalogProviderStatus() {
 async function handleCatalogSearch(req, res) {
   const query = await readJson(req);
   const address = cleanText(stringValue(query.address));
+  const lentaStore = selectedLentaStore(query);
   await ensureMcp(address);
   const liveProducts = [];
   if (catalogMode === "live" && mcpClient) {
@@ -531,9 +533,9 @@ async function handleCatalogSearch(req, res) {
       pyaterochkaUnavailableUntil = Date.now() + 60_000;
     }
   }
-  if (lentaEnabled && address) {
+  if (lentaEnabled && address && lentaStore.id) {
     try {
-      const products = await getLentaAdapter(address).searchProducts(query, address);
+      const products = await getLentaAdapter(address, lentaStore).searchProducts(query, address);
       liveProducts.push(...products);
     } catch (error) {
       logCatalogError("lenta", "search", error);
@@ -541,6 +543,14 @@ async function handleCatalogSearch(req, res) {
   }
   if (liveProducts.length) return send(res, 200, { mode: "live", products: dedupeByXmlId(liveProducts) });
   send(res, 200, { mode: "demo", products: searchDemo(query).slice(0, 5) });
+}
+
+async function handleLentaStores(req, res) {
+  const body = await readJson(req);
+  const address = cleanText(stringValue(body.address));
+  if (!address) return send(res, 400, { error: "Delivery address is required" });
+  const stores = await createConfiguredLentaAdapter().listStores(address);
+  return send(res, 200, { stores });
 }
 
 async function handleCatalogDetails(url, res) {
@@ -578,12 +588,13 @@ async function handleCatalogDetails(url, res) {
 async function handleCatalogValidate(req, res) {
   const body = await readJson(req);
   const address = cleanText(stringValue(body.address));
+  const lentaStore = selectedLentaStore(body);
   const items = (body.items || []).slice(0, 20);
   const result = { products: [], unavailableXmlIds: [], changedPrices: [] };
   const lentaItems = items.filter((item) => String(item.xmlId || "").startsWith("lenta:"));
-  if (lentaItems.length && lentaEnabled && address) {
+  if (lentaItems.length && lentaEnabled && address && lentaStore.id) {
     try {
-      const products = await getLentaAdapter(address).verifyCartItems(lentaItems, address);
+      const products = await getLentaAdapter(address, lentaStore).verifyCartItems(lentaItems, address);
       const productMap = new Map(products.map((product) => [product.xmlId, product]));
       result.products.push(...products);
       for (const item of lentaItems) {
@@ -683,20 +694,37 @@ function callPyaterochkaMcp(name, args) {
   return withTimeout(pyaterochkaMcpClient.callTool({ name, arguments: args }), 20_000);
 }
 
-function getLentaAdapter(address = "") {
-  const normalizedAddress = normalizeCacheKey(address);
-  if (!lentaAdapter || lentaAdapterAddress !== normalizedAddress) {
-    lentaAdapter = createLentaCatalogAdapter({
+function getLentaAdapter(address = "", store = {}) {
+  const key = `${normalizeCacheKey(address)}:${store.id || ""}`;
+  if (!lentaAdapter || lentaAdapterKey !== key) {
+    lentaAdapter = createConfiguredLentaAdapter({
       address,
-      baseUrl: lentaBaseUrl,
-      retailBrand: lentaRetailBrand,
-      channel: lentaChannel,
-      timeoutMs: lentaApiTimeoutMs,
-      limit: maxSearchResultsPerQuery,
+      storeId: store.id,
+      storeName: store.name,
+      storeAddress: store.address,
     });
-    lentaAdapterAddress = normalizedAddress;
+    lentaAdapterKey = key;
   }
   return lentaAdapter;
+}
+
+function createConfiguredLentaAdapter(options = {}) {
+  return createLentaCatalogAdapter({
+    baseUrl: lentaBaseUrl,
+    retailBrand: lentaRetailBrand,
+    channel: lentaChannel,
+    timeoutMs: lentaApiTimeoutMs,
+    limit: maxSearchResultsPerQuery,
+    ...options,
+  });
+}
+
+function selectedLentaStore(value) {
+  return {
+    id: cleanText(stringValue(value.lentaStoreId)),
+    name: cleanText(stringValue(value.lentaStoreName)),
+    address: cleanText(stringValue(value.lentaStoreAddress)),
+  };
 }
 
 function logCatalogError(retailer, operation, error) {

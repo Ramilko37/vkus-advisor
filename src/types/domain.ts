@@ -24,9 +24,19 @@ export interface UserProfile {
   userId?: string;
   email?: string;
   address: string;
+  lentaStoreId?: string;
+  lentaStoreName?: string;
+  lentaStoreAddress?: string;
   householdSize: number;
   excludedIngredients: string[];
   preferences: string[];
+}
+
+export interface LentaStore {
+  id: string;
+  name?: string;
+  address?: string;
+  distanceMeters?: number;
 }
 
 export interface BasketIntent {
@@ -83,6 +93,7 @@ export interface BasketVariantItemDraft {
 }
 
 export interface BasketVariantDraft {
+  retailer?: NonNullable<NormalizedProduct["retailer"]>;
   strategy: BasketPriority;
   items: BasketVariantItemDraft[];
 }
@@ -191,4 +202,9 @@ export interface BasketValidationResult {
   products: NormalizedProduct[];
   unavailableXmlIds: string[];
   changedPrices: Array<{ xmlId: string; oldPriceRub: number; newPriceRub: number }>;
+}
+
+export interface CheckoutResult {
+  url: string;
+  items?: BasketItem[];
 }

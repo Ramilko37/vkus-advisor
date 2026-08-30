@@ -25,6 +25,9 @@ describe("profileRepository", () => {
   it("saves and loads a normalized guest profile", () => {
     window.localStorage.setItem(storageKey, JSON.stringify({
       address: "  Москва, Тверская 1  ",
+      lentaStoreId: " 525 ",
+      lentaStoreName: " ТК1453 ",
+      lentaStoreAddress: " Москва, Овчинниковская наб., 22/24с1 ",
       householdSize: 2,
       defaultDays: 5,
       defaultBudgetRub: 3000,
@@ -35,6 +38,9 @@ describe("profileRepository", () => {
     expect(loadGuestProfile()).toEqual({
       ...DEFAULT_PROFILE,
       address: "Москва, Тверская 1",
+      lentaStoreId: "525",
+      lentaStoreName: "ТК1453",
+      lentaStoreAddress: "Москва, Овчинниковская наб., 22/24с1",
       householdSize: 2,
       excludedIngredients: ["грибы"],
       preferences: ["быстро"],

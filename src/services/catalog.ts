@@ -1,4 +1,4 @@
-import type { BasketValidationResult, CatalogClient, NormalizedProduct, SearchQuery, UserProfile } from "../types/domain";
+import type { BasketValidationResult, CatalogClient, LentaStore, NormalizedProduct, SearchQuery, UserProfile } from "../types/domain";
 import { logCatalogProductsSummary, recordLentaCatalogProducts } from "./catalogDebug";
 import { DEFAULT_PROFILE } from "./profileRepository";
 
@@ -13,11 +13,11 @@ export class ApiCatalogClient implements CatalogClient {
   }
 
   async searchProducts(query: SearchQuery, signal?: AbortSignal) {
-    console.info("catalog_search_request", { query: query.query, hasAddress: Boolean(this.profile.address.trim()) });
+    console.info("catalog_search_request", { query: query.query, hasAddress: Boolean(this.profile.address.trim()), lentaStoreId: this.profile.lentaStoreId });
     const response = await fetchJson<{ mode: "live" | "demo"; products: NormalizedProduct[] }>("/api/catalog/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...query, address: this.profile.address.trim() || undefined }),
+      body: JSON.stringify({ ...query, address: this.profile.address.trim() || undefined, ...lentaStorePayload(this.profile) }),
       signal,
     });
     this.mode = response.mode;
@@ -34,7 +34,7 @@ export class ApiCatalogClient implements CatalogClient {
     const response = await fetchJson<BasketValidationResult>("/api/catalog/validate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items, address: this.profile.address.trim() || undefined }),
+      body: JSON.stringify({ items, address: this.profile.address.trim() || undefined, ...lentaStorePayload(this.profile) }),
       signal,
     });
     logCatalogProductsSummary("validate", response.products);
@@ -57,6 +57,24 @@ export async function createCatalogClient(profile: UserProfile = DEFAULT_PROFILE
   const client = new ApiCatalogClient(profile);
   await client.connect(signal);
   return client;
+}
+
+export async function findLentaStores(address: string, signal?: AbortSignal): Promise<LentaStore[]> {
+  const response = await fetchJson<{ stores: LentaStore[] }>("/api/catalog/lenta/stores", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address: address.trim() }),
+    signal,
+  });
+  return response.stores;
+}
+
+function lentaStorePayload(profile: UserProfile) {
+  return {
+    lentaStoreId: /^ТК(\d+)$/i.exec(profile.lentaStoreName?.trim() || "")?.[1] || profile.lentaStoreId,
+    lentaStoreName: profile.lentaStoreName,
+    lentaStoreAddress: profile.lentaStoreAddress,
+  };
 }
 
 async function fetchJson<T>(url: string, init: RequestInit): Promise<T> {

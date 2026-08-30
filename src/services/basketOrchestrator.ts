@@ -79,7 +79,9 @@ export async function composeBaskets(
   signal?: AbortSignal,
   reusedCandidates?: NormalizedProduct[],
 ): Promise<ComposeResult> {
-  const catalogReused = Boolean(reusedCandidates);
+  const catalogReused = Boolean(reusedCandidates && (
+    catalog.mode !== "live" || reusedCandidates.filter((product) => product.retailer === "lenta").length >= 4
+  ));
   const search = catalogReused
     ? { result: reusedCandidates ?? [], durationMs: 0 }
     : await measureStage(() => retrieveCandidateProducts(intent, catalog, signal));
@@ -91,6 +93,9 @@ export async function composeBaskets(
   const retailerGroups = groupCandidatesByRetailer(candidates);
   const selectedGroups = retailerGroups
     .map((group) => ({ retailer: group.retailer, candidates: selectCandidatesForLlm(group.candidates, intent) }));
+  if (catalog.mode === "live" && (selectedGroups.find((group) => group.retailer === "lenta")?.candidates.length || 0) < 4) {
+    throw new Error("Лента не вернула достаточно товаров для указанного адреса. Проверьте адрес или повторите позже.");
+  }
   const composableGroups = selectedGroups.filter((group) => group.candidates.length >= 4);
   console.info("basket_candidate_groups", {
     raw: countProductsByRetailer(candidates),
@@ -101,70 +106,73 @@ export async function composeBaskets(
   if (!composableGroups.length) {
     throw new Error("Не удалось найти достаточно подходящих товаров. Попробуйте упростить ограничения.");
   }
-  const basketResults = await Promise.allSettled(composableGroups.map((group) => composeRetailerBaskets(group, intent, llm, sessionId, signal)));
+  const basketResult = await composeRetailerBaskets(composableGroups, intent, llm, sessionId, signal);
   const llmCandidates = composableGroups.flatMap((group) => group.candidates.map((product) => toLlmCandidate(product, intent)));
-  const variants = await refreshValidatedBasketItems(basketResults.flatMap((result) => result.status === "fulfilled" ? result.value.variants : []), catalog, signal);
+  const variants = await refreshValidatedBasketItems(basketResult.variants, catalog, signal);
   const strategies = new Set(variants.map((variant) => variant.strategy));
-  if (variants.length < 3 || strategies.size !== 3 || variants.some((variant) => variant.items.length === 0)) {
+  if (variants.length !== composableGroups.length * 3 || strategies.size !== 3 || variants.some((variant) => variant.items.length === 0)) {
     throw new Error("Модель вернула неподходящий формат. Повторите сборку корзины.");
   }
-  const retailerResults = buildRetailerResults(retailerGroups, selectedGroups, basketResults);
+  const retailerResults = buildRetailerResults(retailerGroups, selectedGroups, variants);
   return {
     intent,
     candidates,
     variants,
     retailerResults,
-    models: basketResults.flatMap((result) => result.status === "fulfilled" ? [result.value.model] : []),
+    models: [basketResult.model],
     candidatePayloadBytes: candidatePayloadBytes(llmCandidates),
     catalogSearchMs: search.durationMs,
     rawCandidateCount,
     finalCandidateCount: candidates.length,
     catalogRequestCount: reusedCandidates ? 0 : intent.searchQueries.slice(0, 5).length,
     catalogReused,
-    basketRetryCount: fulfilledBasketResults(basketResults).reduce((sum, result) => sum + (result.retryCount || 0), 0),
-    basketFallbackModelUsed: fulfilledBasketResults(basketResults).some((result) => result.fallbackModelUsed),
-    basketPromptTokens: sumUsage(fulfilledBasketResults(basketResults), "promptTokens"),
-    basketCompletionTokens: sumUsage(fulfilledBasketResults(basketResults), "completionTokens"),
-    basketReasoningTokens: sumUsage(fulfilledBasketResults(basketResults), "reasoningTokens"),
+    basketRetryCount: basketResult.retryCount || 0,
+    basketFallbackModelUsed: Boolean(basketResult.fallbackModelUsed),
+    basketPromptTokens: basketResult.usage?.promptTokens,
+    basketCompletionTokens: basketResult.usage?.completionTokens,
+    basketReasoningTokens: basketResult.usage?.reasoningTokens,
   };
 }
 
 async function composeRetailerBaskets(
-  group: { retailer?: NormalizedProduct["retailer"]; candidates: NormalizedProduct[] },
+  groups: Array<{ retailer?: NormalizedProduct["retailer"]; candidates: NormalizedProduct[] }>,
   intent: BasketIntent,
   llm: LlmClientLike,
   sessionId: string,
   signal?: AbortSignal,
 ) {
-  const llmCandidates = group.candidates.map((product) => toLlmCandidate(product, intent));
+  const llmCandidates = groups.flatMap((group) => group.candidates.map((product) => toLlmCandidate(product, intent)));
   let basketResult: StructuredGenerationResult<{ variants: BasketVariantDraft[] }>;
-  let variants: BasketVariant[];
   try {
     basketResult = await llm.generateStructured<{ variants: BasketVariantDraft[] }>({
       systemPrompt: basketPrompt,
       userPayload: {
         intent,
+        retailers: groups.map((group) => group.retailer || "demo"),
         candidateProducts: llmCandidates,
       },
       jsonSchema: basketDraftJsonSchema,
       validator: basketDraftResponseSchema,
       sessionId,
       stage: "basket",
-      maxTokens: 1800,
+      maxTokens: 4800,
       signal,
     });
-    variants = hydrateAndValidateVariants(basketResult.data.variants, group.candidates, intent);
   } catch {
     basketResult = { model: "deterministic-fallback", data: { variants: [] }, fallbackModelUsed: true };
-    variants = [];
   }
   return {
     ...basketResult,
-    variants: (variants.length === 3 ? variants : deterministicRetailerVariants(group.candidates, intent)).map((variant) => ({
-      ...variant,
-      id: group.retailer ? `${group.retailer}:${variant.id}` : variant.id,
-      retailer: group.retailer,
-    })),
+    variants: groups.flatMap((group) => {
+      const retailer = group.retailer || "demo";
+      const drafts = basketResult.data.variants.filter((draft) => draft.retailer === retailer || (groups.length === 1 && !draft.retailer));
+      const hydrated = hydrateAndValidateVariants(drafts, group.candidates, intent);
+      return (hydrated.length === 3 ? hydrated : deterministicRetailerVariants(group.candidates, intent)).map((variant) => ({
+        ...variant,
+        id: group.retailer ? `${group.retailer}:${variant.id}` : variant.id,
+        retailer: group.retailer,
+      }));
+    }),
   };
 }
 
@@ -174,8 +182,8 @@ function deterministicRetailerVariants(candidates: NormalizedProduct[], intent: 
   const quick = [...selected].sort((a, b) => quickScore(b) - quickScore(a));
   const drafts: BasketVariantDraft[] = [
     deterministicDraft("balanced", selected.slice(0, 8)),
-    deterministicDraft("budget", cheap.slice(0, 8)),
-    deterministicDraft("speed", quick.slice(0, 8)),
+    deterministicDraft("budget", cheap.slice(0, 6)),
+    deterministicDraft("speed", quick.slice(0, 4)),
   ];
   return hydrateAndValidateVariants(drafts, selected, intent);
 }
@@ -234,14 +242,10 @@ function countGroupsByRetailer(groups: Array<{ retailer?: NormalizedProduct["ret
 function buildRetailerResults(
   rawGroups: Array<{ retailer?: NormalizedProduct["retailer"]; candidates: NormalizedProduct[] }>,
   selectedGroups: Array<{ retailer?: NormalizedProduct["retailer"]; candidates: NormalizedProduct[] }>,
-  basketResults: Array<PromiseSettledResult<StructuredGenerationResult<{ variants: BasketVariantDraft[] }> & { variants: BasketVariant[] }>>,
+  variants: BasketVariant[],
 ): RetailerResult[] {
   const rawCounts = new Map(rawGroups.map((group) => [group.retailer || "demo", group.candidates.length]));
   const selectedCounts = new Map(selectedGroups.map((group) => [group.retailer || "demo", group.candidates.length]));
-  const resultByRetailer = new Map<string, PromiseSettledResult<StructuredGenerationResult<{ variants: BasketVariantDraft[] }> & { variants: BasketVariant[] }>>();
-  selectedGroups.filter((group) => group.candidates.length >= 4).forEach((group, index) => {
-    resultByRetailer.set(group.retailer || "demo", basketResults[index]);
-  });
 
   const retailers = rawGroups.some((group) => !group.retailer || group.retailer === "demo")
     ? (["demo"] as const)
@@ -249,24 +253,12 @@ function buildRetailerResults(
   return retailers.map((retailer) => {
     const candidateCount = rawCounts.get(retailer) || 0;
     const selectedCandidateCount = selectedCounts.get(retailer) || 0;
-    const result = resultByRetailer.get(retailer);
-    const variantCount = result?.status === "fulfilled" ? result.value.variants.length : 0;
+    const variantCount = variants.filter((variant) => (variant.retailer || "demo") === retailer).length;
     if (!candidateCount) return { retailer, status: "no_candidates", candidateCount, selectedCandidateCount, variantCount, message: "Каталог не вернул подходящие товары." };
     if (selectedCandidateCount < 4) return { retailer, status: "insufficient_candidates", candidateCount, selectedCandidateCount, variantCount, message: "Недостаточно товаров для трёх корзин." };
-    if (result?.status === "fulfilled" && variantCount === 3) return { retailer, status: "ready", candidateCount, selectedCandidateCount, variantCount };
+    if (variantCount === 3) return { retailer, status: "ready", candidateCount, selectedCandidateCount, variantCount };
     return { retailer, status: "failed", candidateCount, selectedCandidateCount, variantCount, message: "Не удалось собрать три валидные корзины." };
   });
-}
-
-function fulfilledBasketResults(
-  results: Array<PromiseSettledResult<StructuredGenerationResult<unknown>>>,
-): Array<StructuredGenerationResult<unknown>> {
-  return results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-}
-
-function sumUsage(results: Array<StructuredGenerationResult<unknown>>, key: "promptTokens" | "completionTokens" | "reasoningTokens") {
-  const values = results.map((result) => result.usage?.[key]).filter((value): value is number => typeof value === "number");
-  return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined;
 }
 
 function fallbackQueries(intent: BasketIntent) {
