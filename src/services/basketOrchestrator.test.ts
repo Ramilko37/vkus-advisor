@@ -211,7 +211,7 @@ describe("composeBaskets", () => {
     expect(result.variants.map((variant) => variant.id)).toContain("lenta:balanced");
   });
 
-  it("does not call the basket model when live search has too few Lenta products", async () => {
+  it("keeps other retailer baskets when Lenta has no candidates", async () => {
     const vkusvillProducts: NormalizedProduct[] = [1, 2, 3, 4].map((index) => ({
       id: `vkusvill:${index}`,
       xmlId: `vkusvill:${index}`,
@@ -245,10 +245,18 @@ describe("composeBaskets", () => {
       },
     };
 
-    await expect(composeBaskets(intent, retailerCatalog, model, "session")).rejects.toThrow(
-      "Лента не вернула достаточно товаров для указанного адреса. Проверьте адрес или повторите позже.",
-    );
-    expect(modelCallCount).toBe(0);
+    const result = await composeBaskets(intent, retailerCatalog, model, "session");
+
+    expect(modelCallCount).toBe(1);
+    expect(result.variants.map((variant) => variant.id)).toEqual([
+      "vkusvill:balanced",
+      "vkusvill:budget",
+      "vkusvill:speed",
+    ]);
+    expect(result.retailerResults).toContainEqual(expect.objectContaining({
+      retailer: "lenta",
+      status: "no_candidates",
+    }));
   });
 
   it("falls back to deterministic retailer baskets when one retailer returns invalid drafts", async () => {

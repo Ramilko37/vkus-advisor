@@ -93,9 +93,6 @@ export async function composeBaskets(
   const retailerGroups = groupCandidatesByRetailer(candidates);
   const selectedGroups = retailerGroups
     .map((group) => ({ retailer: group.retailer, candidates: selectCandidatesForLlm(group.candidates, intent) }));
-  if (catalog.mode === "live" && (selectedGroups.find((group) => group.retailer === "lenta")?.candidates.length || 0) < 4) {
-    throw new Error("Лента не вернула достаточно товаров для указанного адреса. Проверьте адрес или повторите позже.");
-  }
   const composableGroups = selectedGroups.filter((group) => group.candidates.length >= 4);
   console.info("basket_candidate_groups", {
     raw: countProductsByRetailer(candidates),

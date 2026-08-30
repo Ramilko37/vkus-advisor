@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PROFILE } from "../services/profileRepository";
 import type { BasketIntent, NormalizedProduct, StructuredGenerationResult } from "../types/domain";
@@ -50,6 +50,20 @@ describe("useBasketPlanner profile", () => {
     expect(mocks.createCatalogClient).toHaveBeenCalledWith(profile);
   });
 
+  it("clears the current basket and its persisted copy for a new search", async () => {
+    const { result } = renderHook(() => useBasketPlanner(DEFAULT_PROFILE));
+
+    act(() => result.current.mockResults());
+    await waitFor(() => expect(sessionStorage.getItem("vkusvill-advisor:last-results")).not.toBeNull());
+
+    act(() => (result.current as typeof result.current & { reset?: () => void }).reset?.());
+
+    expect(result.current.state.stage).toBe("idle");
+    expect(result.current.state.intent).toBeNull();
+    expect(result.current.state.variants).toEqual([]);
+    await waitFor(() => expect(sessionStorage.getItem("vkusvill-advisor:last-results")).toBeNull());
+  });
+
   it("requires address before building live retailer baskets", async () => {
     const { result } = renderHook(() => useBasketPlanner(DEFAULT_PROFILE));
 
@@ -65,8 +79,9 @@ describe("useBasketPlanner profile", () => {
     expect(mocks.createCatalogClient).not.toHaveBeenCalled();
   });
 
-  it("requires a selected Lenta store before starting the workflow", async () => {
+  it("starts the workflow without a selected Lenta store", async () => {
     const profile = { ...DEFAULT_PROFILE, address: "Москва, Вавилова 19" };
+    mocks.createCatalogClient.mockRejectedValue(new Error("catalog offline"));
     const { result } = renderHook(() => useBasketPlanner(profile));
 
     await act(async () => {
@@ -74,11 +89,8 @@ describe("useBasketPlanner profile", () => {
     });
 
     expect(result.current.state.stage).toBe("error");
-    expect(result.current.state.error).toEqual(expect.objectContaining({
-      code: "missing_lenta_store",
-      message: "Выберите магазин Ленты в профиле перед поиском.",
-    }));
-    expect(mocks.createCatalogClient).not.toHaveBeenCalled();
+    expect(result.current.state.error).toEqual(expect.objectContaining({ code: "unknown" }));
+    expect(result.current.state.error?.message).not.toMatch(/магазин Ленты/i);
   });
 
   it("recreates cached catalog client when delivery address changes", async () => {

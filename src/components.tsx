@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Gift, Heart, Home, Loader2, MapPin, Menu, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, CircleHelp, Copy, ExternalLink, Gift, Heart, Home, Loader2, MapPin, Menu, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { BasketItem, BasketVariant, CheckoutResult, LentaStore, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
@@ -78,9 +78,12 @@ function scrollToTop() {
   window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
 }
 
-export function AppShell({ children, route, authProfile }: { children: ReactNode; route: "home" | "results"; authProfile: AuthProfile }) {
+export function AppShell({ children, route, authProfile, onOpenOnboarding }: { children: ReactNode; route: "home" | "results"; authProfile: AuthProfile; onOpenOnboarding: () => void }) {
   return (
     <main className={`app-shell kit-shell ${route}-route`} data-g2-mode="compact">
+      <button className="onboarding-trigger liquid-glass" type="button" onClick={onOpenOnboarding} aria-label="Показать онбординг" title="Как это работает">
+        <CircleHelp size={19} />
+      </button>
       <ProfileControl
         profile={authProfile.profile}
         authConfigured={authProfile.authConfigured}
@@ -143,11 +146,6 @@ export function ProfileControl({
     if (nextProfile.address && nextProfile.address.length < 5) {
       setSaveStatus("error");
       setSaveError("Адрес выглядит слишком коротким. Укажите город, улицу и дом.");
-      return;
-    }
-    if (nextProfile.address && !nextProfile.lentaStoreId) {
-      setSaveStatus("error");
-      setSaveError("Выберите магазин Ленты для этого адреса.");
       return;
     }
     setSaveStatus("saving");
@@ -375,7 +373,7 @@ export function ProfileControl({
               {(authError || saveError) && <p className="profile-dialog-error" role="alert">{saveError ?? authError}</p>}
             </div>
             <footer className="profile-save-bar">
-              <button className="primary-button full" type="submit" disabled={!dirty || saveStatus === "saving" || Boolean(normalizedDraft.address && !normalizedDraft.lentaStoreId)}>{saveStatus === "saving" ? "Сохраняем..." : "Сохранить изменения"}</button>
+              <button className="primary-button full" type="submit" disabled={!dirty || saveStatus === "saving"}>{saveStatus === "saving" ? "Сохраняем..." : "Сохранить изменения"}</button>
             </footer>
           </form>
         </div>
@@ -503,8 +501,14 @@ export function Header({ route }: { route: "home" | "results" }) {
   );
 }
 
-export function ConversationPanel({ planner, hasDeliveryAddress, hasLentaStore }: { planner: Planner; hasDeliveryAddress: boolean; hasLentaStore: boolean }) {
-  const [text, setText] = useState("");
+export function ConversationPanel({ planner, hasDeliveryAddress, onNeedsDelivery, draft, onDraftChange }: { planner: Planner; hasDeliveryAddress: boolean; onNeedsDelivery?: (request: string) => void; draft?: string; onDraftChange?: (request: string) => void }) {
+  const [localText, setLocalText] = useState("");
+  const text = draft ?? localText;
+  const setText = (value: string | ((current: string) => string)) => {
+    const next = typeof value === "function" ? value(text) : value;
+    if (draft === undefined) setLocalText(next);
+    onDraftChange?.(next);
+  };
   const showMessages = planner.state.messages.length > 1 || planner.state.stage === "clarifying" || planner.state.stage === "error";
   const busy = ["analyzing", "searching", "composing", "creatingCart"].includes(planner.state.stage);
   const submit = (value = text) => {
@@ -515,7 +519,7 @@ export function ConversationPanel({ planner, hasDeliveryAddress, hasLentaStore }
   return (
     <section className="conversation-panel kit-home" aria-label="Подбор корзины" data-od-id="conversation-panel">
       {showMessages && <MessageList messages={planner.state.messages} />}
-      <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} hasDeliveryAddress={hasDeliveryAddress} hasLentaStore={hasLentaStore} />
+      <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} hasDeliveryAddress={hasDeliveryAddress} onNeedsDelivery={onNeedsDelivery} />
       <CategoryShortcuts onPick={(fragment) => setText((current) => appendBriefFragment(current, fragment))} />
       <IntentChips intent={planner.state.intent} />
       {planner.state.error && <ErrorNotice message={planner.state.error.message} onRetry={planner.retry} />}
@@ -578,41 +582,6 @@ export function IntentChips({ intent }: { intent: Planner["state"]["intent"] }) 
   );
 }
 
-export function FullscreenLoader({ stage, intent, onCancel }: { stage: WorkflowStage; intent: Planner["state"]["intent"]; onCancel: () => void }) {
-  const steps: Array<{ id: WorkflowStage; title: string; text: string }> = [
-    { id: "analyzing", title: "Запрос", text: "Выделяем дни, бюджет и ограничения" },
-    { id: "searching", title: "Каталог", text: "Ищем подходящие товары" },
-    { id: "composing", title: "Варианты", text: "Сравниваем три корзины" },
-  ];
-  const activeIndex = Math.max(0, steps.findIndex((step) => step.id === stage));
-
-  return (
-    <div className="liquid-loader-backdrop" role="status" aria-live="polite" aria-busy="true">
-      <div className="liquid-loader-card liquid-glass">
-        <p className="loader-kicker">{stageLabels[stage]}</p>
-        <h2>{stage === "creatingCart" ? "Готовим ссылку на корзину" : "Подбираем корзину"}</h2>
-        {intent && (
-          <div className="loader-slots" aria-label="Параметры запроса">
-            {summarizeIntentSlots(intent).map((slot) => <span key={slot}>{slot}</span>)}
-          </div>
-        )}
-        <ol className="loader-steps">
-          {steps.map((step, index) => (
-            <li key={step.id} className={index < activeIndex ? "done" : index === activeIndex ? "current" : ""}>
-              <span aria-hidden="true">{index < activeIndex ? "✓" : index + 1}</span>
-              <div>
-                <strong>{step.title}</strong>
-                <small>{step.text}</small>
-              </div>
-            </li>
-          ))}
-        </ol>
-        <button className="secondary-button" type="button" onClick={onCancel}>Отменить</button>
-      </div>
-    </div>
-  );
-}
-
 export function PromptExamples({ onPick }: { onPick: (value: string) => void }) {
   return (
     <div className="examples" aria-label="Готовые запросы">
@@ -626,19 +595,21 @@ export function PromptExamples({ onPick }: { onPick: (value: string) => void }) 
   );
 }
 
-export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddress, hasLentaStore }: { value: string; onChange: (value: string) => void; onSubmit: () => void; busy: boolean; hasDeliveryAddress: boolean; hasLentaStore: boolean }) {
+export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddress, onNeedsDelivery, chips = briefChips, placeholder = "Например: ужины для двоих, без грибов", hint, submitLabel }: { value: string; onChange: (value: string) => void; onSubmit: () => void; busy: boolean; hasDeliveryAddress: boolean; onNeedsDelivery?: (request: string) => void; chips?: Array<{ label: string; fragment: string }>; placeholder?: string; hint?: string; submitLabel?: string }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasText = value.trim().length > 0;
-  const canSubmit = hasText && hasDeliveryAddress && hasLentaStore && !busy;
+  const canSubmit = hasText && !busy;
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!canSubmit) return;
-    onSubmit();
+    if (hasDeliveryAddress) onSubmit();
+    else onNeedsDelivery?.(value.trim());
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && canSubmit) {
       event.preventDefault();
-      onSubmit();
+      if (hasDeliveryAddress) onSubmit();
+      else onNeedsDelivery?.(value.trim());
     }
   };
   const addBriefChip = (fragment: string) => {
@@ -650,10 +621,10 @@ export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddre
     <form className="composer vv-chat-composer liquid-glass" onSubmit={handleSubmit}>
       <div className="composer-head">
         <label htmlFor="basket-request">Что собрать?</label>
-        <p id="basket-request-hint">{!hasDeliveryAddress ? "Сначала добавьте адрес доставки в профиле — без него поиск недоступен." : !hasLentaStore ? "Выберите магазин Ленты в профиле — без него поиск недоступен." : "Добавьте срок, людей, бюджет или ограничения."}</p>
+        <p id="basket-request-hint">{hint ?? (!hasDeliveryAddress ? "Введите запрос — адрес добавим на следующем шаге." : "Добавьте срок, людей, бюджет или ограничения.")}</p>
       </div>
       <div className="brief-chips" aria-label="Быстро добавить параметры">
-        {briefChips.map((chip) => (
+        {chips.map((chip) => (
           <button key={chip.fragment} type="button" onClick={() => addBriefChip(chip.fragment)}>
             {chip.label}
           </button>
@@ -666,13 +637,13 @@ export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddre
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Например: ужины для двоих, без грибов"
+          placeholder={placeholder}
           rows={3}
           aria-describedby="basket-request-hint"
         />
-        <button type="submit" disabled={!canSubmit} aria-label={!hasDeliveryAddress ? "Сначала добавьте адрес доставки" : !hasLentaStore ? "Сначала выберите магазин Ленты" : hasText ? "Подобрать 3 корзины" : "Введите задачу для подбора"} aria-keyshortcuts="Control+Enter Meta+Enter">
+        <button type="submit" disabled={!canSubmit} aria-label={hasText ? (hasDeliveryAddress ? (submitLabel ?? "Подобрать 3 корзины") : "Продолжить") : "Введите задачу для подбора"} aria-keyshortcuts="Control+Enter Meta+Enter">
           {busy ? <Loader2 className="spin" size={18} /> : <ShoppingBasket size={18} />}
-          <span>{busy ? "Собираем..." : !hasDeliveryAddress ? "Добавьте адрес" : !hasLentaStore ? "Выберите Ленту" : "Подобрать 3 корзины"}</span>
+          <span>{busy ? "Собираем..." : hasDeliveryAddress ? (submitLabel ?? "Подобрать 3 корзины") : "Продолжить"}</span>
         </button>
       </div>
     </form>
@@ -686,7 +657,7 @@ function appendBriefFragment(value: string, fragment: string) {
   return `${trimmed}, ${fragment}`;
 }
 
-export function BasketResults({ planner }: { planner: Planner }) {
+export function BasketResults({ planner, showResultsHint = false, showBasketEditHint = false, onDismissResultsHint, onDismissBasketEditHint, onVariantOpen, onBasketEdit, onCheckoutClick, onStartNewSearch }: { planner: Planner; showResultsHint?: boolean; showBasketEditHint?: boolean; onDismissResultsHint?: () => void; onDismissBasketEditHint?: () => void; onVariantOpen?: (retailer?: string) => void; onBasketEdit?: (retailer?: string) => void; onCheckoutClick?: (retailer?: string) => void; onStartNewSearch?: () => void }) {
   const [openedId, setOpenedId] = useState<string | null>(planner.state.selectedId);
   const [activeRetailer, setActiveRetailer] = useState<RetailerKey>(() => defaultRetailerKey(groupBasketVariants(planner.state.variants, planner.state.retailerResults)));
   const variants = planner.state.variants;
@@ -696,6 +667,8 @@ export function BasketResults({ planner }: { planner: Planner }) {
   const selected = planner.state.variants.find((variant) => variant.id === openedId) ?? null;
   const selectedPeerVariants = selected ? variants.filter((variant) => getRetailerKey(variant) === getRetailerKey(selected)) : variants;
   const openVariant = (id: string) => {
+    const variant = planner.state.variants.find((item) => item.id === id);
+    onVariantOpen?.(variant?.retailer);
     planner.selectVariant(id);
     setOpenedId(id);
     scrollToTop();
@@ -723,14 +696,18 @@ export function BasketResults({ planner }: { planner: Planner }) {
             <ChevronLeft size={17} /> К вариантам
           </button>
         </div>
+        {showBasketEditHint && <ContextHint onDismiss={onDismissBasketEditHint}>
+          <strong>Корзина не фиксированная.</strong> Любой товар можно изменить перед покупкой.
+        </ContextHint>}
         <SelectedBasketActions
           variant={selected}
           variants={selectedPeerVariants}
           mode={planner.state.catalogMode}
           creating={planner.state.stage === "creatingCart"}
-          onItems={(items) => planner.updateItems(selected.id, items)}
-          onReplace={(xmlId) => planner.replaceItem(selected.id, xmlId)}
+          onItems={(items) => { onBasketEdit?.(selected.retailer); planner.updateItems(selected.id, items); }}
+          onReplace={(xmlId) => { onBasketEdit?.(selected.retailer); planner.replaceItem(selected.id, xmlId); }}
           onCreateCart={planner.createCart}
+          onCheckoutClick={() => onCheckoutClick?.(selected.retailer)}
         />
       </section>
     );
@@ -738,12 +715,18 @@ export function BasketResults({ planner }: { planner: Planner }) {
 
   return (
     <section className="results-panel kit-results" aria-label="Варианты корзины" data-od-id="results-panel">
-      <div className="section-heading compact-heading">
+      <header className="section-heading compact-heading">
         <div>
-          <p className="section-kicker">Fresh picks</p>
+          <a className="section-kicker results-home-link" href="/" aria-label="На главную" onClick={onStartNewSearch ? (event) => { event.preventDefault(); onStartNewSearch(); } : undefined}>
+            <ChevronLeft size={16} aria-hidden="true" />
+            На главную
+          </a>
           <h2>3 сценария доставки</h2>
         </div>
-      </div>
+      </header>
+      {showResultsHint && <ContextHint onDismiss={onDismissResultsHint}>
+        <strong>Готово. Мы собрали несколько способов решить вашу задачу.</strong> У вариантов разные приоритеты: цена, баланс состава и минимум готовки. Откройте любую корзину, чтобы посмотреть товары и изменить состав.
+      </ContextHint>}
       {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
       {retailerGroups.length > 1 && (
         <div className="retailer-tabs" role="tablist" aria-label="Магазин">
@@ -775,6 +758,15 @@ export function BasketResults({ planner }: { planner: Planner }) {
         )}
       </div>
     </section>
+  );
+}
+
+function ContextHint({ children, onDismiss }: { children: ReactNode; onDismiss?: () => void }) {
+  return (
+    <aside className="onboarding-context-hint" aria-label="Подсказка">
+      <p>{children}</p>
+      <button type="button" onClick={onDismiss}>Понятно</button>
+    </aside>
   );
 }
 
@@ -923,7 +915,7 @@ function ProductThumb({ item }: { item: BasketItem }) {
   );
 }
 
-export function SelectedBasketActions({ variant, variants, mode, creating, onItems, onReplace, onCreateCart }: { variant: BasketVariant; variants: BasketVariant[]; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onReplace: (xmlId: string) => void; onCreateCart: () => Promise<CheckoutResult | null> }) {
+export function SelectedBasketActions({ variant, variants, mode, creating, onItems, onReplace, onCreateCart, onCheckoutClick }: { variant: BasketVariant; variants: BasketVariant[]; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onReplace: (xmlId: string) => void; onCreateCart: () => Promise<CheckoutResult | null>; onCheckoutClick?: () => void }) {
   const [cartUrl, setCartUrl] = useState<string | null>(null);
   const [lentaCopyStatus, setLentaCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [removed, setRemoved] = useState<BasketItem | null>(null);
@@ -933,6 +925,7 @@ export function SelectedBasketActions({ variant, variants, mode, creating, onIte
   const list = useMemo(() => formatBasketList(variant.items), [variant.items]);
   const copy = () => void navigator.clipboard.writeText(list);
   const checkout = async () => {
+    onCheckoutClick?.();
     const result = await onCreateCart();
     if (!result) return;
     if (isLenta) {

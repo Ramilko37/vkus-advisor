@@ -96,3 +96,22 @@ body {
 .checkout-button {
   background: var(--text-primary);
 }
+.onboarding-context-hint {
+  display: flex;
+  gap: 16px;
+  margin: 0 0 20px;
+  padding: 16px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, white);
+  border-radius: var(--radius-card);
+  background: var(--accent-soft);
+}
+
+.onboarding-context-hint p { margin: 0; color: var(--text-secondary); }
+.onboarding-context-hint strong { color: var(--text-primary); }
+.onboarding-context-hint button { flex: 0 0 auto; min-height: 40px; padding: 0 16px; border: 0; border-radius: var(--radius-control); background: var(--accent); color: white; font-weight: 800; cursor: pointer; }
+
+@media (max-width: 600px) {
+  .onboarding-context-hint { align-items: stretch; flex-direction: column; }
+}

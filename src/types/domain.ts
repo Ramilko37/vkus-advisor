@@ -32,6 +32,19 @@ export interface UserProfile {
   preferences: string[];
 }
 
+export type OnboardingStatus = "not_started" | "in_progress" | "completed" | "dismissed";
+export type OnboardingStep = "value" | "delivery" | "profile";
+
+export interface OnboardingState {
+  version: 1;
+  status: OnboardingStatus;
+  step: OnboardingStep;
+  requestDraft: string;
+  completedAt?: string;
+  resultsHintDismissed: boolean;
+  basketEditHintDismissed: boolean;
+}
+
 export interface LentaStore {
   id: string;
   name?: string;

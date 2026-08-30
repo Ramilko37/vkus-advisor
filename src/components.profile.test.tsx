@@ -74,7 +74,7 @@ describe("ProfileControl", () => {
     }));
   });
 
-  it("requires selecting a nearby Lenta store before saving an address", async () => {
+  it("saves an address without requiring a Lenta store", async () => {
     const onChange = vi.fn();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -101,19 +101,13 @@ describe("ProfileControl", () => {
     fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Тверская 1" } });
 
-    expect(screen.getByRole("button", { name: "Сохранить изменения" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Найти магазины Ленты" }));
-    const store = await screen.findByRole("radio", { name: /ТК1453/ });
-    fireEvent.click(store);
     expect(screen.getByRole("button", { name: "Сохранить изменения" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       address: "Москва, Тверская 1",
-      lentaStoreId: "525",
-      lentaStoreName: "ТК1453",
-      lentaStoreAddress: "Москва, Овчинниковская наб., 22/24с1",
     })));
+    expect(onChange.mock.calls[0][0]).not.toHaveProperty("lentaStoreId");
   });
 
   it("shows Email OTP entry when Supabase auth is configured", () => {
@@ -153,12 +147,13 @@ describe("Header", () => {
 describe("ConversationPanel", () => {
   afterEach(() => cleanup());
 
-  it("requires a delivery address before enabling basket search", () => {
+  it("routes a written request to delivery setup when the address is missing", () => {
     const submit = vi.fn();
+    const onNeedsDelivery = vi.fn();
     render(
       <ConversationPanel
         hasDeliveryAddress={false}
-        hasLentaStore={false}
+        onNeedsDelivery={onNeedsDelivery}
         planner={{
           state: {
             stage: "idle",
@@ -187,17 +182,54 @@ describe("ConversationPanel", () => {
 
     fireEvent.change(screen.getByLabelText("Что собрать?"), { target: { value: "ужины на три дня" } });
 
-    expect(screen.getByText("Сначала добавьте адрес доставки в профиле — без него поиск недоступен.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Сначала добавьте адрес доставки" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Сначала добавьте адрес доставки" }));
+    expect(screen.getByText("Введите запрос — адрес добавим на следующем шаге.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+    expect(onNeedsDelivery).toHaveBeenCalledWith("ужины на три дня");
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("submits with an address even when no Lenta store is selected", () => {
+    const submit = vi.fn();
+    render(
+      <ConversationPanel
+        hasDeliveryAddress
+        planner={{
+          state: {
+            stage: "idle",
+            messages: [],
+            intent: null,
+            variants: [],
+            retailerResults: [],
+            selectedId: null,
+            error: null,
+            catalogMode: "live",
+            modelNames: [],
+            pendingMessage: null,
+          },
+          submit,
+          retry: vi.fn(),
+          reconnectCatalog: vi.fn(),
+          mockResults: vi.fn(),
+          createCart: vi.fn(),
+          cancel: vi.fn(),
+          replaceItem: vi.fn(),
+          selectVariant: vi.fn(),
+          clearVariantSelection: vi.fn(),
+          updateItems: vi.fn(),
+        } as never}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Что собрать?"), { target: { value: "ужины на три дня" } });
+    fireEvent.click(screen.getByRole("button", { name: "Подобрать 3 корзины" }));
+
+    expect(submit).toHaveBeenCalledWith("ужины на три дня");
   });
 
   it("adds grocery category shortcuts to the request", () => {
     render(
       <ConversationPanel
         hasDeliveryAddress
-        hasLentaStore
         planner={{
           state: {
             stage: "idle",
@@ -232,6 +264,71 @@ describe("ConversationPanel", () => {
 
 describe("BasketResults", () => {
   afterEach(() => cleanup());
+
+  it("provides a header link back to the home screen", () => {
+    render(
+      <BasketResults
+        planner={{
+          state: {
+            stage: "ready", messages: [], intent: null,
+            variants: [makeVariant("vkusvill", "balanced", "Творог ВкусВилл")],
+            retailerResults: [], selectedId: null, error: null, catalogMode: "live", modelNames: [], pendingMessage: null,
+          },
+          submit: vi.fn(), retry: vi.fn(), reconnectCatalog: vi.fn(), mockResults: vi.fn(), createCart: vi.fn(), cancel: vi.fn(), replaceItem: vi.fn(), selectVariant: vi.fn(), clearVariantSelection: vi.fn(), updateItems: vi.fn(),
+        } as never}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "На главную" })).toHaveAttribute("href", "/");
+  });
+
+  it("shows and dismisses the first-results hint", () => {
+    const onDismissResultsHint = vi.fn();
+    render(
+      <BasketResults
+        planner={{
+          state: {
+            stage: "ready",
+            messages: [],
+            intent: null,
+            variants: [makeVariant("vkusvill", "balanced", "Творог ВкусВилл")],
+            retailerResults: [],
+            selectedId: null,
+            error: null,
+            catalogMode: "live",
+            modelNames: [],
+            pendingMessage: null,
+          },
+          submit: vi.fn(), retry: vi.fn(), reconnectCatalog: vi.fn(), mockResults: vi.fn(), createCart: vi.fn(), cancel: vi.fn(), replaceItem: vi.fn(), selectVariant: vi.fn(), clearVariantSelection: vi.fn(), updateItems: vi.fn(),
+        } as never}
+        showResultsHint
+        onDismissResultsHint={onDismissResultsHint}
+      />,
+    );
+
+    expect(screen.getByText(/Готово. Мы собрали несколько способов/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Понятно" }));
+    expect(onDismissResultsHint).toHaveBeenCalledOnce();
+  });
+
+  it("shows the basket-edit hint and reports the first edit", () => {
+    const onBasketEdit = vi.fn();
+    const variant = makeVariant("vkusvill", "balanced", "Творог ВкусВилл");
+    render(
+      <BasketResults
+        planner={{
+          state: { stage: "ready", messages: [], intent: null, variants: [variant], retailerResults: [], selectedId: variant.id, error: null, catalogMode: "live", modelNames: [], pendingMessage: null },
+          submit: vi.fn(), retry: vi.fn(), reconnectCatalog: vi.fn(), mockResults: vi.fn(), createCart: vi.fn(), cancel: vi.fn(), replaceItem: vi.fn(), selectVariant: vi.fn(), clearVariantSelection: vi.fn(), updateItems: vi.fn(),
+        } as never}
+        showBasketEditHint
+        onBasketEdit={onBasketEdit}
+      />,
+    );
+
+    expect(screen.getByText(/Корзина не фиксированная/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Увеличить" }));
+    expect(onBasketEdit).toHaveBeenCalledWith("vkusvill");
+  });
 
   it("shows retailer tabs and switches retailer variants", () => {
     render(

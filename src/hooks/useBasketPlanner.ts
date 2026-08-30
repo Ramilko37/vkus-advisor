@@ -37,7 +37,8 @@ type Action =
   | { type: "select"; id: string | null }
   | { type: "items"; id: string; items: BasketItem[] }
   | { type: "error"; error: AppError; pendingMessage?: string }
-  | { type: "clearError" };
+  | { type: "clearError" }
+  | { type: "reset" };
 
 const RESULTS_STORAGE_KEY = "vkusvill-advisor:last-results";
 const RESULTS_SCHEMA_VERSION = 10;
@@ -77,6 +78,8 @@ function reducer(state: PlannerState, action: Action): PlannerState {
       return { ...state, stage: "error", error: action.error, pendingMessage: action.pendingMessage ?? state.pendingMessage };
     case "clearError":
       return { ...state, error: null };
+    case "reset":
+      return { ...createInitialState(), catalogMode: state.catalogMode };
     default:
       return state;
   }
@@ -199,25 +202,17 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true }, pendingMessage: trimmed });
       return;
     }
-    if (!profile.lentaStoreId) {
-      dispatch({ type: "error", error: { source: "validation", code: "missing_lenta_store", message: "Выберите магазин Ленты в профиле перед поиском.", recoverable: true }, pendingMessage: trimmed });
-      return;
-    }
     dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "user", content: trimmed, createdAt: Date.now() } });
     await runWorkflow(trimmed);
-  }, [profile.address, profile.lentaStoreId, runWorkflow, state.intent]);
+  }, [profile.address, runWorkflow, state.intent]);
 
   const retry = useCallback(() => {
     if (!profile.address.trim()) {
       dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true } });
       return;
     }
-    if (!profile.lentaStoreId) {
-      dispatch({ type: "error", error: { source: "validation", code: "missing_lenta_store", message: "Выберите магазин Ленты в профиле перед поиском.", recoverable: true } });
-      return;
-    }
     if (state.pendingMessage) void runWorkflow(state.pendingMessage);
-  }, [profile.address, profile.lentaStoreId, runWorkflow, state.pendingMessage]);
+  }, [profile.address, runWorkflow, state.pendingMessage]);
 
   const reconnectCatalog = useCallback(async () => {
     dispatch({ type: "catalog", mode: "connecting" });
@@ -278,6 +273,15 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
     dispatch({ type: "stage", stage: "idle" });
   }, []);
 
+  const reset = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    activeRequestIdRef.current = null;
+    candidatePoolRef.current = null;
+    sessionStorage.removeItem(RESULTS_STORAGE_KEY);
+    dispatch({ type: "reset" });
+  }, []);
+
   const replaceItem = useCallback((variantId: string, xmlId: string) => {
     const variant = state.variants.find((item) => item.id === variantId);
     const pool = candidatePoolRef.current?.products.length ? candidatePoolRef.current.products : state.variants.flatMap((item) => item.items);
@@ -293,6 +297,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
     mockResults,
     createCart,
     cancel,
+    reset,
     replaceItem,
     selectVariant: (id: string) => dispatch({ type: "select", id }),
     clearVariantSelection: () => dispatch({ type: "select", id: null }),
