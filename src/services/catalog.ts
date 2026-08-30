@@ -1,4 +1,5 @@
-import type { CatalogClient, NormalizedProduct, SearchQuery, UserProfile } from "../types/domain";
+import type { BasketValidationResult, CatalogClient, NormalizedProduct, SearchQuery, UserProfile } from "../types/domain";
+import { logCatalogProductsSummary, recordLentaCatalogProducts } from "./catalogDebug";
 import { DEFAULT_PROFILE } from "./profileRepository";
 
 export class ApiCatalogClient implements CatalogClient {
@@ -12,6 +13,7 @@ export class ApiCatalogClient implements CatalogClient {
   }
 
   async searchProducts(query: SearchQuery, signal?: AbortSignal) {
+    console.info("catalog_search_request", { query: query.query, hasAddress: Boolean(this.profile.address.trim()) });
     const response = await fetchJson<{ mode: "live" | "demo"; products: NormalizedProduct[] }>("/api/catalog/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -19,11 +21,25 @@ export class ApiCatalogClient implements CatalogClient {
       signal,
     });
     this.mode = response.mode;
+    logCatalogProductsSummary("search", response.products, query.query);
+    recordLentaCatalogProducts("search", response.products, query.query);
     return response.products;
   }
 
   async getProductDetails(productId: string, signal?: AbortSignal) {
     return fetchJson<Partial<NormalizedProduct>>(`/api/catalog/details?id=${encodeURIComponent(productId)}`, { method: "GET", signal });
+  }
+
+  async validateBasketItems(items: Array<{ xmlId: string; quantity: number; priceRub?: number }>, signal?: AbortSignal) {
+    const response = await fetchJson<BasketValidationResult>("/api/catalog/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items, address: this.profile.address.trim() || undefined }),
+      signal,
+    });
+    logCatalogProductsSummary("validate", response.products);
+    recordLentaCatalogProducts("validate", response.products);
+    return response;
   }
 
   async createCartLink(items: Array<{ xmlId: string; quantity: number }>, signal?: AbortSignal) {

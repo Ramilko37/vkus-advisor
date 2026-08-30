@@ -12,3 +12,4 @@ dist
 !*.config.js
 !server.mjs
 .vercel
+.lenta-spike/

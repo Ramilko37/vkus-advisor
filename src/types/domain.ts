@@ -49,13 +49,15 @@ export interface BasketIntent {
 export interface NormalizedProduct {
   id: string;
   xmlId: string;
-  retailer?: "vkusvill" | "pyaterochka" | "demo";
+  retailer?: "vkusvill" | "pyaterochka" | "lenta" | "demo";
   name: string;
   priceRub: number;
   oldPriceRub?: number;
+  loyaltyPriceRub?: number;
   rating?: number;
   reviewsCount?: number;
   weightLabel?: string;
+  unit?: string;
   imageUrl?: string;
   productUrl?: string;
   description?: string;
@@ -64,6 +66,11 @@ export interface NormalizedProduct {
   proteins?: number;
   fats?: number;
   carbohydrates?: number;
+  availability?: "available" | "unavailable" | "unknown";
+  priceObservedAt?: string;
+  storeId?: string;
+  storeName?: string;
+  storeAddress?: string;
   sourceQuery: string;
   isDemo: boolean;
 }
@@ -88,6 +95,7 @@ export interface BasketItem extends NormalizedProduct {
 
 export interface BasketVariant {
   id: string;
+  retailer?: NormalizedProduct["retailer"];
   strategy: BasketPriority;
   title: string;
   summary: string;
@@ -96,6 +104,17 @@ export interface BasketVariant {
   totalRub: number;
   uniqueItemsCount: number;
   warnings: string[];
+}
+
+export type RetailerResultStatus = "ready" | "no_candidates" | "insufficient_candidates" | "failed";
+
+export interface RetailerResult {
+  retailer: NonNullable<NormalizedProduct["retailer"]>;
+  status: RetailerResultStatus;
+  candidateCount: number;
+  selectedCandidateCount: number;
+  variantCount: number;
+  message?: string;
 }
 
 export interface ChatMessage {
@@ -164,5 +183,12 @@ export interface CatalogClient {
   connect(signal?: AbortSignal): Promise<void>;
   searchProducts(query: SearchQuery, signal?: AbortSignal): Promise<NormalizedProduct[]>;
   getProductDetails(productId: string, signal?: AbortSignal): Promise<Partial<NormalizedProduct>>;
+  validateBasketItems?(items: Array<{ xmlId: string; quantity: number; priceRub?: number }>, signal?: AbortSignal): Promise<BasketValidationResult>;
   createCartLink(items: Array<{ xmlId: string; quantity: number }>, signal?: AbortSignal): Promise<string>;
+}
+
+export interface BasketValidationResult {
+  products: NormalizedProduct[];
+  unavailableXmlIds: string[];
+  changedPrices: Array<{ xmlId: string; oldPriceRub: number; newPriceRub: number }>;
 }

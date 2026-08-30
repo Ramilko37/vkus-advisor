@@ -68,6 +68,22 @@ PYATEROCHKA_SEARCH_RESULTS_PER_QUERY=4
 
 Если переменные Пятёрочки не заданы, приложение работает только с ВкусВилл и не пытается подключаться к локальному MCP.
 
+Опционально можно включить каталог доставки Ленты. Лента использует адрес профиля: сервер геокодирует его, выбирает ближайший hub, ищет товары в контексте магазина и повторно проверяет SKU перед показом корзины.
+
+```env
+LENTA_ENABLED=true
+LENTA_API_BASE_URL=https://integration.api.lenta.com
+LENTA_RETAIL_BRAND=lo
+LENTA_CHANNEL=lo
+LENTA_API_TIMEOUT_MS=5000
+```
+
+Перед включением в новой среде полезно прогнать API spike. Raw-ответы сохраняются в `.lenta-spike/` и не коммитятся:
+
+```bash
+node scripts/lenta-spike.mjs --lat 55.7558 --lon 37.6173 --lat 55.7512 --lon 37.6184 --lat 55.8078 --lon 37.6387
+```
+
 Не открывайте `index.html` через `file://`: в этом режиме браузер не сможет вызвать `/api/llm` и `/api/catalog/*`.
 
 Если нужно временно вернуть OpenRouter, явно задайте `LLM_PROVIDER=openrouter` и старые `OPENROUTER_*` переменные.

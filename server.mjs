@@ -6,6 +6,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createCatalogProviderStatus, parseEnvBoolean } from "./src/services/catalogProviderStatus.mjs";
+import { createLentaCatalogAdapter } from "./src/services/lentaCatalog.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 loadDotEnv();
@@ -32,6 +34,11 @@ const pyaterochkaMcpUrl = process.env.PYATEROCHKA_MCP_URL || "";
 const pyaterochkaConfiguredStoreId = process.env.PYATEROCHKA_STORE_ID || "";
 const pyaterochkaAddress = process.env.PYATEROCHKA_ADDRESS || "";
 const pyaterochkaMaxSearchResultsPerQuery = Number(process.env.PYATEROCHKA_SEARCH_RESULTS_PER_QUERY || 4);
+const lentaEnabled = parseEnvBoolean(process.env.LENTA_ENABLED, true);
+const lentaBaseUrl = process.env.LENTA_API_BASE_URL || "https://integration.api.lenta.com";
+const lentaRetailBrand = process.env.LENTA_RETAIL_BRAND || "lo";
+const lentaChannel = process.env.LENTA_CHANNEL || "lo";
+const lentaApiTimeoutMs = Number(process.env.LENTA_API_TIMEOUT_MS || 5000);
 const mcpUrls = [
   process.env.VKUSVILL_MCP_URL || "https://mcp.vkusvill.ru/mcp",
   "https://mcp001.vkusvill.ru/mcp",
@@ -45,6 +52,8 @@ let pyaterochkaMcpClient = null;
 let pyaterochkaStoreId = "";
 let pyaterochkaStoreAddress = "";
 let pyaterochkaUnavailableUntil = 0;
+let lentaAdapter = null;
+let lentaAdapterAddress = "";
 let catalogMode = "demo";
 const searchCache = new Map();
 const detailsCache = new Map();
@@ -67,16 +76,14 @@ export async function handleRequest(req, res) {
       basketModel: effectiveModel(activeModel("basket")),
       openRouterReferer,
       openRouterTitle,
-      pyaterochkaConfigured: Boolean(pyaterochkaMcpUrl),
-      pyaterochkaConnected: Boolean(pyaterochkaMcpClient),
-      pyaterochkaStore: pyaterochkaStoreId ? "resolved" : pyaterochkaConfiguredStoreId ? "configured" : pyaterochkaStoreAddress || pyaterochkaAddress ? "address" : "missing",
-      catalogMode,
+      ...catalogProviderStatus(),
     });
     if (url.pathname === "/api/llm" && req.method === "POST") return await handleLlm(req, res);
     if (url.pathname === "/api/openrouter" && req.method === "POST") return await handleOpenRouter(req, res);
     if (url.pathname === "/api/catalog/status") return await handleCatalogStatus(res);
     if (url.pathname === "/api/catalog/search" && req.method === "POST") return await handleCatalogSearch(req, res);
     if (url.pathname === "/api/catalog/details") return await handleCatalogDetails(url, res);
+    if (url.pathname === "/api/catalog/validate" && req.method === "POST") return await handleCatalogValidate(req, res);
     if (url.pathname === "/api/catalog/cart" && req.method === "POST") return await handleCart(req, res);
     return await serveStatic(url, res);
   } catch (error) {
@@ -468,7 +475,17 @@ function effectiveModel(model) {
 
 async function handleCatalogStatus(res) {
   await ensureMcp();
-  send(res, 200, { mode: catalogMode });
+  send(res, 200, { mode: catalogMode, ...catalogProviderStatus() });
+}
+
+function catalogProviderStatus() {
+  return createCatalogProviderStatus({
+    env: process.env,
+    catalogMode,
+    lentaStoreResolved: Boolean(lentaAdapter?.currentStoreId),
+    pyaterochkaConnected: Boolean(pyaterochkaMcpClient),
+    pyaterochkaStoreState: pyaterochkaStoreId ? "resolved" : pyaterochkaConfiguredStoreId ? "configured" : pyaterochkaStoreAddress || pyaterochkaAddress ? "address" : "missing",
+  });
 }
 
 async function handleCatalogSearch(req, res) {
@@ -514,6 +531,14 @@ async function handleCatalogSearch(req, res) {
       pyaterochkaUnavailableUntil = Date.now() + 60_000;
     }
   }
+  if (lentaEnabled && address) {
+    try {
+      const products = await getLentaAdapter(address).searchProducts(query, address);
+      liveProducts.push(...products);
+    } catch (error) {
+      logCatalogError("lenta", "search", error);
+    }
+  }
   if (liveProducts.length) return send(res, 200, { mode: "live", products: dedupeByXmlId(liveProducts) });
   send(res, 200, { mode: "demo", products: searchDemo(query).slice(0, 5) });
 }
@@ -521,6 +546,13 @@ async function handleCatalogSearch(req, res) {
 async function handleCatalogDetails(url, res) {
   const id = url.searchParams.get("id") || "";
   await ensureMcp();
+  if (id.startsWith("lenta:") && lentaEnabled && lentaAdapter?.hasStore()) {
+    try {
+      return send(res, 200, await lentaAdapter.getProductDetails(id));
+    } catch (error) {
+      logCatalogError("lenta", "getOffers", error);
+    }
+  }
   if (id.startsWith("pyaterochka:") && pyaterochkaMcpClient && pyaterochkaStoreId) {
     try {
       const payload = await callPyaterochkaMcp("get_product_info", { store_id: pyaterochkaStoreId, plu: id.replace(/^pyaterochka:/, "") });
@@ -543,9 +575,41 @@ async function handleCatalogDetails(url, res) {
   send(res, 200, demoProducts.find((product) => product.id === id || product.xmlId === id) || {});
 }
 
+async function handleCatalogValidate(req, res) {
+  const body = await readJson(req);
+  const address = cleanText(stringValue(body.address));
+  const items = (body.items || []).slice(0, 20);
+  const result = { products: [], unavailableXmlIds: [], changedPrices: [] };
+  const lentaItems = items.filter((item) => String(item.xmlId || "").startsWith("lenta:"));
+  if (lentaItems.length && lentaEnabled && address) {
+    try {
+      const products = await getLentaAdapter(address).verifyCartItems(lentaItems, address);
+      const productMap = new Map(products.map((product) => [product.xmlId, product]));
+      result.products.push(...products);
+      for (const item of lentaItems) {
+        const product = productMap.get(item.xmlId);
+        if (!product || product.availability === "unavailable") result.unavailableXmlIds.push(item.xmlId);
+      }
+      for (const product of products) {
+        const original = lentaItems.find((item) => item.xmlId === product.xmlId);
+        if (original && Number(original.priceRub) > 0 && Math.round(Number(original.priceRub)) !== Math.round(product.priceRub)) {
+          result.changedPrices.push({ xmlId: product.xmlId, oldPriceRub: Number(original.priceRub), newPriceRub: product.priceRub });
+        }
+      }
+    } catch (error) {
+      logCatalogError("lenta", "validate", error);
+    }
+  }
+  send(res, 200, result);
+}
+
 async function handleCart(req, res) {
   const body = await readJson(req);
   await ensureMcp();
+  const lentaItems = (body.items || []).filter((item) => String(item.xmlId || "").startsWith("lenta:"));
+  if (lentaItems.length) {
+    return send(res, 409, { error: "Lenta SKU were rechecked through /api/catalog/validate. Public cart links are not available for Lenta yet." });
+  }
   if (catalogMode !== "live" || !mcpClient) return send(res, 409, { error: "Demo mode cannot create cart links" });
   const items = (body.items || []).slice(0, 20);
   if (items.some((item) => !/^\d+$/.test(String(item.xmlId)))) {
@@ -617,6 +681,31 @@ async function resolvePyaterochkaStoreId(client, address) {
 
 function callPyaterochkaMcp(name, args) {
   return withTimeout(pyaterochkaMcpClient.callTool({ name, arguments: args }), 20_000);
+}
+
+function getLentaAdapter(address = "") {
+  const normalizedAddress = normalizeCacheKey(address);
+  if (!lentaAdapter || lentaAdapterAddress !== normalizedAddress) {
+    lentaAdapter = createLentaCatalogAdapter({
+      address,
+      baseUrl: lentaBaseUrl,
+      retailBrand: lentaRetailBrand,
+      channel: lentaChannel,
+      timeoutMs: lentaApiTimeoutMs,
+      limit: maxSearchResultsPerQuery,
+    });
+    lentaAdapterAddress = normalizedAddress;
+  }
+  return lentaAdapter;
+}
+
+function logCatalogError(retailer, operation, error) {
+  console.warn("catalog_request_failed", {
+    retailer,
+    operation,
+    errorType: error?.name || "Error",
+    status: error?.status,
+  });
 }
 
 async function serveStatic(url, res) {

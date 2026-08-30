@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, NormalizedProduct, PipelineMetrics, UserProfile, WorkflowStage } from "../types/domain";
+import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, NormalizedProduct, PipelineMetrics, RetailerResult, UserProfile, WorkflowStage } from "../types/domain";
 import { analyzeIntent, basketSummary, composeBaskets } from "../services/basketOrchestrator";
 import { BrowserLlmClient, LlmProviderError, getSessionId } from "../services/openRouterClient";
 import { createCatalogClient } from "../services/catalog";
@@ -14,6 +14,7 @@ interface PlannerState {
   messages: ChatMessage[];
   intent: BasketIntent | null;
   variants: BasketVariant[];
+  retailerResults: RetailerResult[];
   selectedId: string | null;
   error: AppError | null;
   catalogMode: "live" | "demo" | "connecting";
@@ -32,13 +33,14 @@ type Action =
   | { type: "stage"; stage: WorkflowStage }
   | { type: "message"; message: ChatMessage }
   | { type: "intent"; intent: BasketIntent }
-  | { type: "ready"; intent: BasketIntent; variants: BasketVariant[]; models: string[] }
+  | { type: "ready"; intent: BasketIntent; variants: BasketVariant[]; retailerResults: RetailerResult[]; models: string[] }
   | { type: "select"; id: string | null }
   | { type: "items"; id: string; items: BasketItem[] }
   | { type: "error"; error: AppError; pendingMessage?: string }
   | { type: "clearError" };
 
 const RESULTS_STORAGE_KEY = "vkusvill-advisor:last-results";
+const RESULTS_SCHEMA_VERSION = 10;
 
 function createInitialState(): PlannerState {
   return {
@@ -46,6 +48,7 @@ function createInitialState(): PlannerState {
     messages: [{ id: crypto.randomUUID(), role: "assistant", createdAt: Date.now(), content: "Расскажите, какую задачу нужно решить с продуктами: на неделю, на семью, бюджет, предпочтения, ограничения — чем подробнее, тем лучше предложу варианты." }],
     intent: null,
     variants: [],
+    retailerResults: [],
     selectedId: null,
     error: null,
     catalogMode: "connecting",
@@ -65,7 +68,7 @@ function reducer(state: PlannerState, action: Action): PlannerState {
     case "intent":
       return { ...state, intent: action.intent, stage: action.intent.needsClarification ? "clarifying" : state.stage };
     case "ready":
-      return { ...state, stage: "ready", intent: action.intent, variants: action.variants, selectedId: null, modelNames: [...state.modelNames, ...action.models], error: null };
+      return { ...state, stage: "ready", intent: action.intent, variants: action.variants, retailerResults: action.retailerResults, selectedId: null, modelNames: [...state.modelNames, ...action.models], error: null };
     case "select":
       return { ...state, selectedId: action.id };
     case "items":
@@ -82,18 +85,21 @@ function reducer(state: PlannerState, action: Action): PlannerState {
 export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
   const [state, dispatch] = useReducer(reducer, undefined, restorePlannerState);
   const catalogRef = useRef<CatalogClient | null>(null);
+  const catalogProfileKeyRef = useRef("");
   const candidatePoolRef = useRef<CandidatePool | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const llm = useMemo(() => new BrowserLlmClient(), []);
   const sessionId = useMemo(() => getSessionId(), []);
+  const { catalogMode, intent, modelNames, retailerResults, selectedId, variants } = state;
 
   useEffect(() => {
-    persistPlannerState(state);
-  }, [state.catalogMode, state.intent, state.modelNames, state.selectedId, state.variants]);
+    persistPlannerState({ catalogMode, intent, modelNames, retailerResults, selectedId, variants });
+  }, [catalogMode, intent, modelNames, retailerResults, selectedId, variants]);
 
   useEffect(() => {
     catalogRef.current = null;
+    catalogProfileKeyRef.current = "";
     candidatePoolRef.current = null;
   }, [profile]);
 
@@ -147,11 +153,10 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
         return;
       }
       dispatch({ type: "stage", stage: "searching" });
-      const catalog = catalogRef.current ?? await createCatalogClient(profile, controller.signal);
-      catalogRef.current = catalog;
+      const catalog = await getCatalogForProfile(catalogRef, catalogProfileKeyRef, profile, controller.signal);
       dispatch({ type: "catalog", mode: catalog.mode });
       dispatch({ type: "stage", stage: "composing" });
-      const fingerprint = buildCatalogFingerprint(intentResult.data);
+      const fingerprint = buildCatalogFingerprint(intentResult.data, profile.address);
       const reusablePool = candidatePoolRef.current?.intentFingerprint === fingerprint ? candidatePoolRef.current.products : undefined;
       const measuredBasket = await measureStage(() => composeBaskets(intentResult.data, catalog, llm, sessionId, controller.signal, reusablePool));
       const result = measuredBasket.result;
@@ -171,7 +176,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       metrics.fallbackModelUsed = metrics.fallbackModelUsed || result.basketFallbackModelUsed;
       candidatePoolRef.current = { intentFingerprint: fingerprint, products: result.candidates, createdAt: Date.now() };
       if (!isActive()) return;
-      dispatch({ type: "ready", intent: result.intent, variants: result.variants, models: [intentResult.model, ...result.models] });
+      dispatch({ type: "ready", intent: result.intent, variants: result.variants, retailerResults: result.retailerResults, models: [intentResult.model, ...result.models] });
       dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "assistant", content: "Готово: собрал три варианта корзины. Выберите подходящий и проверьте состав товаров перед оформлением.", createdAt: Date.now() } });
       metrics.totalMs = Math.round(performance.now() - startedAt);
       console.info("pipeline_metrics", metrics);
@@ -190,37 +195,48 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       dispatch({ type: "error", error: { source: "validation", code: "short_prompt", message: validationError, recoverable: true }, pendingMessage: trimmed });
       return;
     }
+    if (!profile.address.trim()) {
+      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true }, pendingMessage: trimmed });
+      return;
+    }
     dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "user", content: trimmed, createdAt: Date.now() } });
     await runWorkflow(trimmed);
-  }, [runWorkflow, state.intent]);
+  }, [profile.address, runWorkflow, state.intent]);
 
   const retry = useCallback(() => {
+    if (!profile.address.trim()) {
+      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true } });
+      return;
+    }
     if (state.pendingMessage) void runWorkflow(state.pendingMessage);
-  }, [runWorkflow, state.pendingMessage]);
+  }, [profile.address, runWorkflow, state.pendingMessage]);
 
   const reconnectCatalog = useCallback(async () => {
     dispatch({ type: "catalog", mode: "connecting" });
     const catalog = await createCatalogClient(profile);
     catalogRef.current = catalog;
+    catalogProfileKeyRef.current = profileCatalogKey(profile);
     dispatch({ type: "catalog", mode: catalog.mode });
   }, [profile]);
 
   const mockResults = useCallback(() => {
     abortRef.current?.abort();
-    candidatePoolRef.current = { intentFingerprint: buildCatalogFingerprint(mockIntent), products: mockCandidateProducts, createdAt: Date.now() };
+    candidatePoolRef.current = { intentFingerprint: buildCatalogFingerprint(mockIntent, profile.address), products: mockCandidateProducts, createdAt: Date.now() };
     dispatch({ type: "catalog", mode: "live" });
-    dispatch({ type: "ready", intent: mockIntent, variants: mockVariants, models: ["debug/mock"] });
-  }, []);
+    dispatch({ type: "ready", intent: mockIntent, variants: mockVariants, retailerResults: retailerResultsFromVariants(mockVariants), models: ["debug/mock"] });
+  }, [profile.address]);
 
   const createCart = useCallback(async () => {
     const variant = selectedVariant(state);
     if (!variant) return null;
     try {
       let catalog = catalogRef.current;
-      if (!catalog) {
+      const catalogKey = profileCatalogKey(profile);
+      if (!catalog || catalogProfileKeyRef.current !== catalogKey) {
         dispatch({ type: "catalog", mode: "connecting" });
         catalog = await createCatalogClient(profile);
         catalogRef.current = catalog;
+        catalogProfileKeyRef.current = catalogKey;
         dispatch({ type: "catalog", mode: catalog.mode });
       }
       if (catalog.mode === "demo") return null;
@@ -268,7 +284,7 @@ function restorePlannerState(): PlannerState {
     const raw = sessionStorage.getItem(RESULTS_STORAGE_KEY);
     if (!raw) return initial;
     const saved = JSON.parse(raw) as Partial<PlannerState> & { schemaVersion?: number };
-    if (saved.schemaVersion !== 1 || !Array.isArray(saved.variants) || saved.variants.length === 0 || !saved.intent) return initial;
+    if (saved.schemaVersion !== RESULTS_SCHEMA_VERSION || !Array.isArray(saved.variants) || saved.variants.length === 0 || !saved.intent || isStaleRetailerResult(saved)) return initial;
     const selectedId = typeof saved.selectedId === "string" && saved.variants.some((variant) => variant.id === saved.selectedId) ? saved.selectedId : null;
     return {
       ...initial,
@@ -279,6 +295,7 @@ function restorePlannerState(): PlannerState {
       ],
       intent: saved.intent,
       variants: saved.variants,
+      retailerResults: normalizeRetailerResults(saved.retailerResults),
       selectedId,
       catalogMode: saved.catalogMode === "live" || saved.catalogMode === "demo" ? saved.catalogMode : "demo",
       modelNames: Array.isArray(saved.modelNames) ? saved.modelNames.filter((item): item is string => typeof item === "string") : [],
@@ -288,13 +305,14 @@ function restorePlannerState(): PlannerState {
   }
 }
 
-function persistPlannerState(state: PlannerState) {
+function persistPlannerState(state: Pick<PlannerState, "catalogMode" | "intent" | "modelNames" | "retailerResults" | "selectedId" | "variants">) {
   try {
-    if (!state.intent || state.variants.length === 0) return;
+    if (!state.intent || state.variants.length === 0 || isStaleRetailerResult(state)) return;
     sessionStorage.setItem(RESULTS_STORAGE_KEY, JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: RESULTS_SCHEMA_VERSION,
       intent: state.intent,
       variants: state.variants,
+      retailerResults: state.retailerResults,
       selectedId: state.selectedId,
       catalogMode: state.catalogMode === "connecting" ? "demo" : state.catalogMode,
       modelNames: state.modelNames.slice(-4),
@@ -303,6 +321,50 @@ function persistPlannerState(state: PlannerState) {
   } catch {
     // Storage can be unavailable in private modes; the app still works in-memory.
   }
+}
+
+async function getCatalogForProfile(
+  catalogRef: { current: CatalogClient | null },
+  catalogProfileKeyRef: { current: string },
+  profile: UserProfile,
+  signal?: AbortSignal,
+) {
+  const catalogKey = profileCatalogKey(profile);
+  if (catalogRef.current && catalogProfileKeyRef.current === catalogKey) return catalogRef.current;
+  const catalog = await createCatalogClient(profile, signal);
+  catalogRef.current = catalog;
+  catalogProfileKeyRef.current = catalogKey;
+  return catalog;
+}
+
+function profileCatalogKey(profile: UserProfile) {
+  return profile.address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ");
+}
+
+function isStaleRetailerResult(state: { catalogMode?: PlannerState["catalogMode"]; variants?: BasketVariant[]; retailerResults?: RetailerResult[] }) {
+  if (Array.isArray(state.retailerResults) && state.retailerResults.length > 0) return false;
+  const retailers = new Set((state.variants || []).map((variant) => variant.retailer).filter(Boolean));
+  return state.catalogMode === "live" && retailers.size === 1 && retailers.has("vkusvill");
+}
+
+function normalizeRetailerResults(value: unknown): RetailerResult[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is RetailerResult => {
+    if (!item || typeof item !== "object") return false;
+    const result = item as Partial<RetailerResult>;
+    return (result.retailer === "vkusvill" || result.retailer === "lenta" || result.retailer === "pyaterochka" || result.retailer === "demo")
+      && (result.status === "ready" || result.status === "no_candidates" || result.status === "insufficient_candidates" || result.status === "failed")
+      && typeof result.candidateCount === "number"
+      && typeof result.selectedCandidateCount === "number"
+      && typeof result.variantCount === "number";
+  });
+}
+
+function retailerResultsFromVariants(variants: BasketVariant[]): RetailerResult[] {
+  return (["vkusvill", "lenta", "pyaterochka"] as const).map((retailer) => {
+    const count = variants.filter((variant) => variant.retailer === retailer).length;
+    return { retailer, status: count > 0 ? "ready" : "no_candidates", candidateCount: count, selectedCandidateCount: count, variantCount: count };
+  });
 }
 
 function selectedVariant(state: PlannerState) {
@@ -400,6 +462,11 @@ function toMockProduct(item: BasketItem): NormalizedProduct {
     proteins: item.proteins,
     fats: item.fats,
     carbohydrates: item.carbohydrates,
+    availability: item.availability,
+    priceObservedAt: item.priceObservedAt,
+    storeId: item.storeId,
+    storeName: item.storeName,
+    storeAddress: item.storeAddress,
     sourceQuery: item.sourceQuery,
     isDemo: item.isDemo,
   };

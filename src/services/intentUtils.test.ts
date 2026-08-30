@@ -37,6 +37,10 @@ describe("intent utils", () => {
     expect(buildCatalogFingerprint(intent)).not.toBe(buildCatalogFingerprint({ ...intent, excludedIngredients: ["молоко"] }));
   });
 
+  it("changes catalog fingerprint when delivery address changes", () => {
+    expect(buildCatalogFingerprint(intent, "Москва, Тверская 1")).not.toBe(buildCatalogFingerprint(intent, "Москва, Вавилова 19"));
+  });
+
   it("patches simple cheaper follow-up without resetting intent", () => {
     const patched = applyFastIntentPatch("Сделай дешевле.", intent);
     expect(patched).toMatchObject({ priority: "budget", people: 2, days: 5, meals: ["ужин", "завтрак"] });

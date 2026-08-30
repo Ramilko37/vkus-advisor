@@ -37,8 +37,9 @@ export function applyFastIntentPatch(message: string, intent: BasketIntent): Bas
   return null;
 }
 
-export function buildCatalogFingerprint(intent: BasketIntent): string {
+export function buildCatalogFingerprint(intent: BasketIntent, address = ""): string {
   return JSON.stringify({
+    address: address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " "),
     meals: [...intent.meals].sort(),
     excludedIngredients: [...intent.excludedIngredients].sort(),
     preferences: [...intent.preferences].sort(),

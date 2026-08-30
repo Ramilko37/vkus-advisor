@@ -9,11 +9,11 @@ export async function retrieveCandidateProducts(
 ): Promise<NormalizedProduct[]> {
   const queries = deduplicateSearchQueries(intent.searchQueries).slice(0, MAX_SEARCH_QUERIES);
   const settled = await runLimited(queries, 3, (query) => catalog.searchProducts(query, signal));
-  const products = settled.flatMap((result) => (result.status === "fulfilled" ? result.value.slice(0, MAX_SEARCH_RESULTS_PER_QUERY) : []));
-  const deduped = dedupeProducts(products)
+  const products = settled.flatMap((result) => (result.status === "fulfilled" ? capPerRetailer(result.value, MAX_SEARCH_RESULTS_PER_QUERY) : []));
+  const validProducts = dedupeProducts(products)
     .filter((product) => product.xmlId && product.name && product.priceRub > 0)
-    .filter((product) => !matchesExclusions(product, intent.excludedIngredients))
-    .slice(0, MAX_RAW_CANDIDATES);
+    .filter((product) => !matchesExclusions(product, intent.excludedIngredients));
+  const deduped = capRawCandidates(validProducts, MAX_RAW_CANDIDATES, MAX_SEARCH_RESULTS_PER_QUERY);
 
   const needsDetails = deduped.some((product) => !product.imageUrl) || intent.excludedIngredients.length > 0 || intent.preferences.some((item) => /белк|калор/i.test(item));
   if (!needsDetails) return deduped;
@@ -80,6 +80,37 @@ function dedupeProducts(products: NormalizedProduct[]): NormalizedProduct[] {
     if (!current || completeness(product) > completeness(current)) map.set(product.xmlId, product);
   }
   return Array.from(map.values());
+}
+
+function capPerRetailer(products: NormalizedProduct[], limit: number): NormalizedProduct[] {
+  const counts = new Map<string, number>();
+  return products.filter((product) => {
+    const key = product.retailer || "demo";
+    const count = counts.get(key) || 0;
+    if (count >= limit) return false;
+    counts.set(key, count + 1);
+    return true;
+  });
+}
+
+function capRawCandidates(products: NormalizedProduct[], limit: number, retailerQuota: number): NormalizedProduct[] {
+  const selected: NormalizedProduct[] = [];
+  const used = new Set<string>();
+  const counts = new Map<string, number>();
+  for (const product of products) {
+    const key = product.retailer || "demo";
+    const count = counts.get(key) || 0;
+    if (count >= retailerQuota) continue;
+    selected.push(product);
+    used.add(product.xmlId);
+    counts.set(key, count + 1);
+  }
+  for (const product of products) {
+    if (selected.length >= limit) break;
+    if (used.has(product.xmlId)) continue;
+    selected.push(product);
+  }
+  return selected.slice(0, limit);
 }
 
 function completeness(product: NormalizedProduct): number {

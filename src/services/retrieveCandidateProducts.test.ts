@@ -45,4 +45,46 @@ describe("retrieveCandidateProducts", () => {
     expect(products).toHaveLength(1);
     expect(products[0]).toMatchObject({ xmlId: "1", name: "Гречка ядрица", weightLabel: "900 г", imageUrl: "https://img.vkusvill.ru/product.webp" });
   });
+
+  it("keeps enough candidates for a retailer that appears in later searches before applying the global cap", async () => {
+    const intent = {
+      ...baseIntent,
+      excludedIngredients: [],
+      searchQueries: [
+        { query: "мясо", purpose: "белок", sort: "popularity" },
+        { query: "курица", purpose: "белок", sort: "popularity" },
+        { query: "овощи", purpose: "овощи", sort: "popularity" },
+        { query: "зелень", purpose: "зелень", sort: "popularity" },
+      ],
+    } satisfies BasketIntent;
+    const catalog: CatalogClient = {
+      mode: "live",
+      async connect() {},
+      async getProductDetails() { return {}; },
+      async createCartLink() { return ""; },
+      async searchProducts(query) {
+        const retailers = query.query === "зелень" ? ["vkusvill", "lenta", "pyaterochka"] : ["vkusvill", "lenta"];
+        return retailers.flatMap((retailer) =>
+          [1, 2, 3, 4].map((index): NormalizedProduct => ({
+            id: `${retailer}:${query.query}:${index}`,
+            xmlId: `${retailer}:${query.query}:${index}`,
+            retailer: retailer as NormalizedProduct["retailer"],
+            name: `${retailer} ${query.query} ${index}`,
+            priceRub: 100 + index,
+            sourceQuery: query.query,
+            isDemo: false,
+          })),
+        );
+      },
+    };
+
+    const products = await retrieveCandidateProducts(intent, catalog);
+    const counts = products.reduce<Record<string, number>>((acc, product) => {
+      const retailer = product.retailer || "demo";
+      acc[retailer] = (acc[retailer] || 0) + 1;
+      return acc;
+    }, {});
+
+    expect(counts.pyaterochka).toBe(4);
+  });
 });

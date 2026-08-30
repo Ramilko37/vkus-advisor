@@ -1,30 +1,27 @@
 :root {
   color-scheme: light;
-  --vv-bg: #f6f7f4;
-  --vv-surface: #ffffff;
-  --vv-surface-soft: #fbfcfa;
-  --vv-text-primary: #172019;
-  --vv-text-secondary: #58635a;
-  --vv-text-tertiary: #687268;
-  --vv-control: rgba(23, 32, 25, 0.1);
-  --vv-control-strong: rgba(23, 32, 25, 0.16);
-  --vv-focus: color-mix(in srgb, var(--g2-focus) 52%, var(--accent));
-  --vv-glass: linear-gradient(177deg, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.48) 52%, rgba(255, 255, 255, 0.72) 100%);
-  --vv-ai-gradient: var(--g2-ai-07);
+  --vv-bg: var(--background);
+  --vv-surface: var(--surface);
+  --vv-surface-soft: var(--surface-soft);
+  --vv-text-primary: var(--text-primary);
+  --vv-text-secondary: var(--text-secondary);
+  --vv-text-tertiary: var(--text-muted);
+  --vv-control: var(--border);
+  --vv-control-strong: var(--border-strong);
+  --vv-focus: color-mix(in srgb, var(--accent) 34%, white);
 }
 
 body {
-  background: var(--vv-bg);
+  background:
+    linear-gradient(180deg, rgba(9, 145, 31, 0.12), transparent 320px),
+    var(--vv-bg);
   color: var(--vv-text-primary);
   font-size: 16px;
   font-weight: 500;
   line-height: 1.5;
 }
 
-.kit-shell {
-  font-family: var(--font-ui);
-}
-
+.kit-shell,
 .kit-home,
 .kit-results {
   min-width: 0;
@@ -34,16 +31,14 @@ body {
   position: relative;
 }
 
-.vv-kicker,
-.section-kicker {
-  color: var(--accent-hover);
-  font-weight: var(--font-weight-kicker);
-}
-
 .vv-title,
 .compact-heading h2,
 .selected-basket h2 {
   font-weight: var(--font-weight-strong);
+}
+
+.hero-offer .vv-copy {
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .vv-copy,
@@ -52,118 +47,52 @@ body {
   color: var(--vv-text-secondary);
 }
 
-.liquid-glass,
 .vv-chat-composer,
 .vv-selected-basket,
 .vv-checkout-bar {
-  background: var(--vv-glass);
-  border-color: rgba(255, 255, 255, 0.72);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.88),
-    0 16px 36px rgba(23, 32, 25, 0.12);
-  backdrop-filter: blur(18px) saturate(1.18);
+  background: var(--vv-surface);
+  border: 0;
+  box-shadow: var(--shadow-card);
+  backdrop-filter: none;
 }
 
-.vv-chat-composer {
-  border-width: var(--g2-stroke);
+.vv-selected-basket,
+.vv-checkout-bar {
+  box-shadow: var(--shadow-float);
 }
 
 .vv-basket-variant-card,
 .vv-basket-item-row {
-  border-color: var(--vv-control);
-  box-shadow: 0 12px 30px rgba(23, 32, 25, 0.08);
+  border: 0;
+  box-shadow: var(--shadow-card);
 }
 
 .vv-basket-variant-card {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 252, 249, 0.98)),
-    var(--vv-surface);
-}
-
-.vv-basket-variant-card .variant-card-button {
-  gap: 10px;
-  padding: 16px;
+  background: var(--vv-surface);
 }
 
 .vv-basket-variant-card .variant-card-top {
   align-items: center;
 }
 
-.vv-basket-variant-card h2 {
-  font-size: clamp(20px, 5.2vw, 25px);
-  line-height: 1.1;
-  hyphens: none;
-}
-
 .vv-basket-variant-card .recommend-badge {
-  border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
-  background: color-mix(in srgb, var(--accent) 11%, white);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
-}
-
-.vv-basket-variant-card .price {
-  margin-top: 0;
-  font-size: clamp(34px, 9vw, 46px);
-  letter-spacing: 0;
-}
-
-.vv-basket-variant-card .variant-difference {
-  max-width: 34ch;
-  font-size: 16px;
-  line-height: 1.32;
+  background: var(--deal);
+  color: var(--accent-deep);
 }
 
 .vv-basket-variant-card .variant-compare-line span {
-  border: 1px solid color-mix(in srgb, var(--vv-control) 72%, transparent);
-  background: color-mix(in srgb, var(--accent) 5%, white);
+  background: var(--vv-surface-soft);
 }
 
 .vv-basket-variant-card .variant-compare-line span:last-child {
   color: var(--accent-hover);
 }
 
-.vv-basket-variant-card .variant-difference {
-  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
-  border-radius: 12px;
-  padding: 10px 12px;
-  background: color-mix(in srgb, var(--accent) 7%, white);
-  color: var(--vv-text-secondary);
-}
-
-@media (max-width: 520px) {
-  .vv-basket-variant-card .recommend-badge {
-    padding-inline: 10px;
-  }
-}
-
-.vv-basket-variant-card:focus-within,
-.vv-chat-composer:focus-within,
-.vv-selected-basket:focus-within {
-  box-shadow:
-    0 0 0 var(--g2-stroke) color-mix(in srgb, var(--vv-focus) 46%, transparent),
-    0 18px 46px rgba(23, 32, 25, 0.12);
-}
-
-.demo-banner::before,
-.error-notice::before {
-  content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-pill);
-  background: var(--vv-ai-gradient);
-  flex: 0 0 auto;
-  margin-top: 4px;
-}
-
-.demo-banner svg,
-.error-notice svg {
-  flex: 0 0 auto;
-}
-
 .primary-button,
-.composer-input-shell > button,
+.composer-input-shell > button {
+  background: var(--accent);
+}
+
 .checkout-button {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 42%),
-    var(--accent);
+  background: var(--text-primary);
 }

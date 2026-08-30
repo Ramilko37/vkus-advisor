@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AppShell, BasketResults, BasketResultsSkeleton, ConversationPanel, EmptyResultsState, FullscreenLoader } from "./components";
 import { useAuthProfile } from "./hooks/useAuthProfile";
 import { useBasketPlanner } from "./hooks/useBasketPlanner";
+import { registerWebMcpTools } from "./services/webMcpTools";
 import type { WorkflowStage } from "./types/domain";
 
 const resultsPath = "/results";
@@ -22,6 +23,12 @@ export function App() {
     window.history.pushState(null, "", "/");
     setRoute("home");
   };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    registerWebMcpTools(controller.signal);
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const onPopState = () => setRoute(currentRoute());

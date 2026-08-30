@@ -1,6 +1,6 @@
-import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, MapPin, Minus, Plus, RefreshCw, ShoppingBasket, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Gift, Heart, Home, Loader2, MapPin, Menu, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import type { BasketItem, BasketVariant, UserProfile, WorkflowStage } from "./types/domain";
+import type { BasketItem, BasketVariant, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
 import type { AuthStatus } from "./hooks/useAuthProfile";
 import { normalizeProfile } from "./services/profileRepository";
@@ -32,6 +32,13 @@ const briefChips = [
   { label: "быстро", fragment: "почти без готовки" },
 ];
 
+const categoryShortcuts = [
+  { label: "Молочное", icon: "🥛", fragment: "молочные продукты" },
+  { label: "Мясо", icon: "🥩", fragment: "мясо и белок" },
+  { label: "Овощи", icon: "🥬", fragment: "овощи и зелень" },
+  { label: "Готовое", icon: "🍱", fragment: "готовая еда" },
+];
+
 const stageLabels: Record<WorkflowStage, string> = {
   idle: "Готово",
   analyzing: "Разбираем запрос",
@@ -55,6 +62,16 @@ const roleLabels: Record<string, string> = {
   other: "Продукт",
 };
 
+type RetailerKey = NonNullable<BasketVariant["retailer"]>;
+
+const retailerOrder: RetailerKey[] = ["vkusvill", "lenta", "pyaterochka", "demo"];
+const retailerLabels: Record<RetailerKey, string> = {
+  vkusvill: "ВкусВилл",
+  lenta: "Лента",
+  pyaterochka: "Пятёрочка",
+  demo: "Демо",
+};
+
 function scrollToTop() {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
@@ -76,6 +93,7 @@ export function AppShell({ children, route, authProfile }: { children: ReactNode
       <div className="workspace">
         {children}
       </div>
+      <BottomNav route={route} />
     </main>
   );
 }
@@ -397,9 +415,22 @@ export function Header({ route }: { route: "home" | "results" }) {
 
   return (
     <header className="header vv-preview-header" data-od-id="app-header">
-      <p className="brand-kicker vv-kicker">ВкусВилл Advisor</p>
-      <h1 className="vv-title">Умная корзина</h1>
-      <p className="header-copy vv-copy">Расскажите, что нужно купить — подберём три варианта.</p>
+      <div className="delivery-topbar">
+        <button className="icon-button topbar-button" type="button" aria-label="Поиск"><Search size={20} /></button>
+        <div className="delivery-location">
+          <span>Доставка</span>
+          <strong><MapPin size={14} /> Москва</strong>
+        </div>
+        <span aria-hidden="true" />
+      </div>
+      <div className="hero-offer">
+        <div>
+          <p className="brand-kicker vv-kicker">AI-планировщик корзины</p>
+          <h1 className="vv-title">Что купить сегодня?</h1>
+          <p className="header-copy vv-copy">Опишите задачу, а мы соберём три корзины с понятной ценой и заменами.</p>
+        </div>
+        <span className="hero-basket" aria-hidden="true">🥬</span>
+      </div>
     </header>
   );
 }
@@ -417,11 +448,25 @@ export function ConversationPanel({ planner }: { planner: Planner }) {
     <section className="conversation-panel kit-home" aria-label="Подбор корзины" data-od-id="conversation-panel">
       {showMessages && <MessageList messages={planner.state.messages} />}
       <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} />
+      <CategoryShortcuts onPick={(fragment) => setText((current) => appendBriefFragment(current, fragment))} />
       <IntentChips intent={planner.state.intent} />
       {planner.state.error && <ErrorNotice message={planner.state.error.message} onRetry={planner.retry} />}
       <CatalogStatus mode={planner.state.catalogMode} onReconnect={planner.reconnectCatalog} />
       <PromptExamples onPick={setText} />
     </section>
+  );
+}
+
+function CategoryShortcuts({ onPick }: { onPick: (fragment: string) => void }) {
+  return (
+    <div className="category-shortcuts" aria-label="Категории">
+      {categoryShortcuts.map((category) => (
+        <button key={category.label} type="button" onClick={() => onPick(category.fragment)}>
+          <span aria-hidden="true">{category.icon}</span>
+          {category.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -575,8 +620,13 @@ function appendBriefFragment(value: string, fragment: string) {
 
 export function BasketResults({ planner }: { planner: Planner }) {
   const [openedId, setOpenedId] = useState<string | null>(planner.state.selectedId);
+  const [activeRetailer, setActiveRetailer] = useState<RetailerKey>(() => defaultRetailerKey(groupBasketVariants(planner.state.variants, planner.state.retailerResults)));
   const variants = planner.state.variants;
+  const retailerGroups = useMemo(() => groupBasketVariants(variants, planner.state.retailerResults), [planner.state.retailerResults, variants]);
+  const activeGroup = retailerGroups.find((group) => group.key === activeRetailer) ?? retailerGroups[0];
+  const activeVariants = activeGroup?.variants ?? variants;
   const selected = planner.state.variants.find((variant) => variant.id === openedId) ?? null;
+  const selectedPeerVariants = selected ? variants.filter((variant) => getRetailerKey(variant) === getRetailerKey(selected)) : variants;
   const openVariant = (id: string) => {
     planner.selectVariant(id);
     setOpenedId(id);
@@ -586,6 +636,12 @@ export function BasketResults({ planner }: { planner: Planner }) {
   useEffect(() => {
     if (planner.state.selectedId && !openedId) setOpenedId(planner.state.selectedId);
   }, [openedId, planner.state.selectedId]);
+
+  useEffect(() => {
+    if (retailerGroups.length > 0 && !retailerGroups.some((group) => group.key === activeRetailer)) {
+      setActiveRetailer(retailerGroups[0].key);
+    }
+  }, [activeRetailer, retailerGroups]);
 
   if (selected) {
     return (
@@ -601,7 +657,7 @@ export function BasketResults({ planner }: { planner: Planner }) {
         </div>
         <SelectedBasketActions
           variant={selected}
-          variants={variants}
+          variants={selectedPeerVariants}
           mode={planner.state.catalogMode}
           creating={planner.state.stage === "creatingCart"}
           onItems={(items) => planner.updateItems(selected.id, items)}
@@ -616,23 +672,52 @@ export function BasketResults({ planner }: { planner: Planner }) {
     <section className="results-panel kit-results" aria-label="Варианты корзины" data-od-id="results-panel">
       <div className="section-heading compact-heading">
         <div>
-          <p className="section-kicker">Подборка</p>
-          <h2>3 сценария корзины</h2>
+          <p className="section-kicker">Fresh picks</p>
+          <h2>3 сценария доставки</h2>
         </div>
       </div>
       {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
+      {retailerGroups.length > 1 && (
+        <div className="retailer-tabs" role="tablist" aria-label="Магазин">
+          {retailerGroups.map((group) => (
+            <button
+              key={group.key}
+              type="button"
+              role="tab"
+              aria-selected={group.key === activeGroup?.key}
+              onClick={() => setActiveRetailer(group.key)}
+            >
+              {retailerLabels[group.key]}
+              <span>{group.variants.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="variant-list compare-list" data-od-id="variant-grid">
-        {variants.map((variant) => (
+        {activeVariants.length > 0 ? activeVariants.map((variant) => (
           <BasketVariantCard
             key={variant.id}
             variant={variant}
             recommended={variant.strategy === "balanced"}
-            variants={variants}
+            variants={activeVariants}
             onSelect={() => openVariant(variant.id)}
           />
-        ))}
+        )) : (
+          <RetailerEmptyState group={activeGroup} />
+        )}
       </div>
     </section>
+  );
+}
+
+function RetailerEmptyState({ group }: { group?: { key: RetailerKey; result?: RetailerResult } }) {
+  const label = group ? retailerLabels[group.key] : "магазина";
+  const message = group?.result?.message ?? `Пока нет корзин для ${label}`;
+  return (
+    <div className="retailer-empty-state" role="status">
+      <p>{message}</p>
+      {group?.result && <span>Кандидатов: {group.result.candidateCount}</span>}
+    </div>
   );
 }
 
@@ -674,6 +759,30 @@ export function BasketResultsSkeleton({ stage }: { stage: WorkflowStage }) {
   );
 }
 
+function getRetailerKey(variant: Pick<BasketVariant, "retailer">): RetailerKey {
+  return variant.retailer ?? "demo";
+}
+
+function groupBasketVariants(variants: BasketVariant[], retailerResults: RetailerResult[] = []): Array<{ key: RetailerKey; variants: BasketVariant[]; result?: RetailerResult }> {
+  const grouped = new Map<RetailerKey, BasketVariant[]>();
+  variants.forEach((variant) => {
+    const key = getRetailerKey(variant);
+    grouped.set(key, [...(grouped.get(key) ?? []), variant]);
+  });
+  const resultMap = new Map(retailerResults.map((result) => [result.retailer, result]));
+  const hasRetailers = retailerResults.some((result) => result.retailer !== "demo") || variants.some((variant) => variant.retailer && variant.retailer !== "demo");
+  const order = hasRetailers ? retailerOrder.filter((key) => key !== "demo") : retailerOrder;
+  return order.flatMap((key) => {
+    const group = grouped.get(key);
+    const result = resultMap.get(key);
+    return group || result || key !== "demo" ? [{ key, variants: group ?? [], result }] : [];
+  });
+}
+
+function defaultRetailerKey(groups: Array<{ key: RetailerKey; variants: BasketVariant[] }>): RetailerKey {
+  return groups.find((group) => group.variants.length > 0)?.key ?? groups[0]?.key ?? "demo";
+}
+
 export function BasketVariantCard({ variant, recommended, variants, onSelect }: { variant: BasketVariant; recommended: boolean; variants: BasketVariant[]; onSelect: () => void }) {
   const presentation = getVariantPresentation(variant, variants);
 
@@ -709,7 +818,10 @@ export function BasketItemRow({ item, onQuantity, onDelete, onReplace }: { item:
       <ProductThumb item={item} />
       <div className="basket-row-copy">
         <strong>{item.name}</strong>
+        {item.retailer === "lenta" && item.storeName && <span>Лента · {item.storeName}{item.storeAddress ? `, ${item.storeAddress}` : ""}</span>}
         <span>{item.weightLabel ?? roleLabels[item.role] ?? "Продукт"}</span>
+        {item.priceObservedAt && <span>Цена проверена: {formatObservedAt(item.priceObservedAt)}</span>}
+        {item.availability === "unavailable" && <span>Нет в наличии</span>}
       </div>
       <div className="basket-row-actions">
         <div className="quantity" aria-label={`Количество: ${item.name}`}>
@@ -723,6 +835,12 @@ export function BasketItemRow({ item, onQuantity, onDelete, onReplace }: { item:
       <b className="row-price">{Math.round(item.priceRub * item.quantity).toLocaleString("ru-RU")} ₽</b>
     </div>
   );
+}
+
+function formatObservedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
 function ProductThumb({ item }: { item: BasketItem }) {
@@ -759,7 +877,7 @@ export function SelectedBasketActions({ variant, variants, mode, creating, onIte
       <section className="selected-basket vv-selected-basket" data-od-id="selected-basket">
         <div className="section-heading">
           <div>
-            <p className="section-kicker">Выбранная корзина</p>
+            <p className="section-kicker">Checkout</p>
             <h2>{presentation.title}</h2>
             <p>{variant.totalRub.toLocaleString("ru-RU")} ₽ · {variant.uniqueItemsCount} позиций</p>
           </div>
@@ -793,6 +911,32 @@ export function SelectedBasketActions({ variant, variants, mode, creating, onIte
         onCreateCart={async () => setCartUrl(await onCreateCart())}
       />
     </>
+  );
+}
+
+function BottomNav({ route }: { route: "home" | "results" }) {
+  return (
+    <nav className="bottom-nav" aria-label="Основная навигация">
+      <a aria-current={route === "home" ? "page" : undefined} href="/">
+        <Home size={18} />
+        <span>Главная</span>
+      </a>
+      <a aria-current={route === "results" ? "page" : undefined} href="/results">
+        <ShoppingBasket size={18} />
+        <span>Корзина</span>
+      </a>
+      <button className="bottom-fab" type="button" aria-label="Быстрый подбор">
+        <Gift size={22} />
+      </button>
+      <a href="/">
+        <Heart size={18} />
+        <span>Любимое</span>
+      </a>
+      <a href="/">
+        <Menu size={18} />
+        <span>Ещё</span>
+      </a>
+    </nav>
   );
 }
 

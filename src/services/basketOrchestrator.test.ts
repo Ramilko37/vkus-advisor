@@ -84,5 +84,249 @@ describe("composeBaskets", () => {
     expect(result.variants.map((variant) => variant.strategy)).toEqual(["balanced", "budget", "speed"]);
     expect(result.variants[0].title).toBe("Сбалансированная");
     expect(result.variants[0].items[0].reason).toBe("Помогает уложиться в бюджет");
+    expect(result.retailerResults).toEqual([
+      expect.objectContaining({ retailer: "demo", status: "ready", variantCount: 3 }),
+    ]);
+  });
+
+  it("composes three basket variants for each retailer without mixing candidates", async () => {
+    const retailerProducts = (["vkusvill", "lenta", "pyaterochka"] as const).flatMap((retailer) =>
+      [1, 2, 3, 4].map((index): NormalizedProduct => ({
+        id: `${retailer}:${index}`,
+        xmlId: `${retailer}:${index}`,
+        retailer,
+        name: `${retailer} товар ${index}`,
+        priceRub: 100 + index,
+        sourceQuery: "ужин",
+        isDemo: false,
+      })),
+    );
+    const retailerCatalog: CatalogClient = {
+      mode: "live",
+      async connect() {},
+      async searchProducts() { return retailerProducts; },
+      async getProductDetails() { return {}; },
+      async createCartLink() { return ""; },
+    };
+    const retailersSeen: unknown[] = [];
+    const model = {
+      async generateStructured<T>(options: { userPayload: unknown }): Promise<StructuredGenerationResult<T>> {
+        const payload = options.userPayload as { candidateProducts: Array<{ xmlId: string; retailer?: string }> };
+        retailersSeen.push([...new Set(payload.candidateProducts.map((product) => product.retailer))]);
+        const ids = payload.candidateProducts.slice(0, 4).map((product) => product.xmlId);
+        return {
+          model: "test-model",
+          data: {
+            variants: ["balanced", "budget", "speed"].map((strategy) => ({
+              strategy,
+              items: ids.map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
+            })),
+          } as T,
+        };
+      },
+    };
+
+    const result = await composeBaskets(intent, retailerCatalog, model, "session");
+
+    expect(result.variants).toHaveLength(9);
+    expect(result.variants.map((variant) => variant.id)).toEqual([
+      "vkusvill:balanced",
+      "vkusvill:budget",
+      "vkusvill:speed",
+      "lenta:balanced",
+      "lenta:budget",
+      "lenta:speed",
+      "pyaterochka:balanced",
+      "pyaterochka:budget",
+      "pyaterochka:speed",
+    ]);
+    expect(retailersSeen).toEqual([["vkusvill"], ["lenta"], ["pyaterochka"]]);
+    expect(result.retailerResults).toEqual([
+      expect.objectContaining({ retailer: "vkusvill", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
+      expect.objectContaining({ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
+      expect.objectContaining({ retailer: "pyaterochka", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
+    ]);
+  });
+
+  it("falls back to deterministic retailer baskets when one retailer returns invalid drafts", async () => {
+    const retailerProducts = (["vkusvill", "lenta"] as const).flatMap((retailer) =>
+      [1, 2, 3, 4].map((index): NormalizedProduct => ({
+        id: `${retailer}:${index}`,
+        xmlId: `${retailer}:${index}`,
+        retailer,
+        name: `${retailer} товар ${index}`,
+        priceRub: 100 + index,
+        sourceQuery: "ужин",
+        isDemo: false,
+      })),
+    );
+    const retailerCatalog: CatalogClient = {
+      mode: "live",
+      async connect() {},
+      async searchProducts() { return retailerProducts; },
+      async getProductDetails() { return {}; },
+      async createCartLink() { return ""; },
+    };
+    const model = {
+      async generateStructured<T>(options: { userPayload: unknown }): Promise<StructuredGenerationResult<T>> {
+        const payload = options.userPayload as { candidateProducts: Array<{ xmlId: string; retailer?: string }> };
+        const ids = payload.candidateProducts.slice(0, payload.candidateProducts[0]?.retailer === "lenta" ? 2 : 4).map((product) => product.xmlId);
+        return {
+          model: "test-model",
+          data: {
+            variants: ["balanced", "budget", "speed"].map((strategy) => ({
+              strategy,
+              items: ids.map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
+            })),
+          } as T,
+        };
+      },
+    };
+
+    const result = await composeBaskets(intent, retailerCatalog, model, "session");
+
+    expect(result.variants.map((variant) => variant.id)).toEqual([
+      "vkusvill:balanced",
+      "vkusvill:budget",
+      "vkusvill:speed",
+      "lenta:balanced",
+      "lenta:budget",
+      "lenta:speed",
+    ]);
+    expect(result.retailerResults).toEqual([
+      expect.objectContaining({ retailer: "vkusvill", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
+      expect.objectContaining({ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
+      expect.objectContaining({ retailer: "pyaterochka", status: "no_candidates", candidateCount: 0, selectedCandidateCount: 0, variantCount: 0 }),
+    ]);
+  });
+
+  it("falls back to deterministic retailer baskets when the model fails for a retailer", async () => {
+    const retailerProducts = (["vkusvill", "lenta"] as const).flatMap((retailer) =>
+      [1, 2, 3, 4].map((index): NormalizedProduct => ({
+        id: `${retailer}:${index}`,
+        xmlId: `${retailer}:${index}`,
+        retailer,
+        name: `${retailer} товар ${index}`,
+        priceRub: 100 + index,
+        sourceQuery: "ужин",
+        isDemo: false,
+      })),
+    );
+    const retailerCatalog: CatalogClient = {
+      mode: "live",
+      async connect() {},
+      async searchProducts() { return retailerProducts; },
+      async getProductDetails() { return {}; },
+      async createCartLink() { return ""; },
+    };
+    const model = {
+      async generateStructured<T>(options: { userPayload: unknown }): Promise<StructuredGenerationResult<T>> {
+        const payload = options.userPayload as { candidateProducts: Array<{ xmlId: string; retailer?: string }> };
+        if (payload.candidateProducts[0]?.retailer === "lenta") throw new Error("timeout");
+        const ids = payload.candidateProducts.slice(0, 4).map((product) => product.xmlId);
+        return {
+          model: "test-model",
+          data: {
+            variants: ["balanced", "budget", "speed"].map((strategy) => ({
+              strategy,
+              items: ids.map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
+            })),
+          } as T,
+        };
+      },
+    };
+
+    const result = await composeBaskets(intent, retailerCatalog, model, "session");
+
+    expect(result.variants.map((variant) => variant.id)).toContain("lenta:balanced");
+    expect(result.retailerResults).toContainEqual(expect.objectContaining({ retailer: "lenta", status: "ready", variantCount: 3 }));
+  });
+
+  it("keeps Lenta basket items when validation omits products without marking them unavailable", async () => {
+    const lentaProducts: NormalizedProduct[] = [1, 2, 3, 4].map((index) => ({
+      id: `lenta:${index}`,
+      xmlId: `lenta:${index}`,
+      retailer: "lenta",
+      name: `Лента товар ${index}`,
+      priceRub: 100 + index,
+      sourceQuery: "ужин",
+      isDemo: false,
+    }));
+    const validatingCatalog: CatalogClient = {
+      mode: "live",
+      async connect() {},
+      async searchProducts() { return lentaProducts; },
+      async getProductDetails() { return {}; },
+      async createCartLink() { return ""; },
+      async validateBasketItems() {
+        return { products: [], unavailableXmlIds: [], changedPrices: [] };
+      },
+    };
+    const model = {
+      async generateStructured<T>(): Promise<StructuredGenerationResult<T>> {
+        return {
+          model: "test-model",
+          data: {
+            variants: ["balanced", "budget", "speed"].map((strategy) => ({
+              strategy,
+              items: lentaProducts.map((product) => ({ xmlId: product.xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
+            })),
+          } as T,
+        };
+      },
+    };
+
+    const result = await composeBaskets(intent, validatingCatalog, model, "session");
+
+    expect(result.variants.map((variant) => variant.id)).toEqual(["lenta:balanced", "lenta:budget", "lenta:speed"]);
+    expect(result.variants[0].items).toHaveLength(4);
+    expect(result.variants[0].warnings).toContain("Не удалось обновить часть товаров Ленты. Проверьте цену перед оформлением.");
+  });
+
+  it("refreshes Lenta prices and drops unavailable Lenta SKUs before showing baskets", async () => {
+    const lentaProducts: NormalizedProduct[] = [
+      { id: "lenta:1", xmlId: "lenta:1", retailer: "lenta", name: "Молоко", priceRub: 90, availability: "available", sourceQuery: "молоко", isDemo: false },
+      { id: "lenta:2", xmlId: "lenta:2", retailer: "lenta", name: "Яйца", priceRub: 120, availability: "available", sourceQuery: "яйца", isDemo: false },
+      { id: "lenta:3", xmlId: "lenta:3", retailer: "lenta", name: "Овощи", priceRub: 150, sourceQuery: "овощи", isDemo: false },
+      { id: "lenta:4", xmlId: "lenta:4", retailer: "lenta", name: "Суп", priceRub: 220, sourceQuery: "суп", isDemo: false },
+      { id: "lenta:5", xmlId: "lenta:5", retailer: "lenta", name: "Плов", priceRub: 250, sourceQuery: "плов", isDemo: false },
+    ];
+    const validatingCatalog: CatalogClient = {
+      mode: "live",
+      async connect() {},
+      async searchProducts() { return lentaProducts; },
+      async getProductDetails() { return {}; },
+      async createCartLink() { return ""; },
+      async validateBasketItems() {
+        return {
+          products: [
+            { ...lentaProducts[0], priceRub: 99, priceObservedAt: "2026-08-29T10:00:00.000Z" },
+            ...lentaProducts.slice(2),
+          ],
+          unavailableXmlIds: ["lenta:2"],
+          changedPrices: [{ xmlId: "lenta:1", oldPriceRub: 90, newPriceRub: 99 }],
+        };
+      },
+    };
+    const model = {
+      async generateStructured<T>(): Promise<StructuredGenerationResult<T>> {
+        return {
+          model: "test-model",
+          data: {
+            variants: ["balanced", "budget", "speed"].map((strategy) => ({
+              strategy,
+              items: ["lenta:1", "lenta:2", "lenta:3", "lenta:4", "lenta:5"].map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
+            })),
+          } as T,
+        };
+      },
+    };
+
+    const result = await composeBaskets(intent, validatingCatalog, model, "session");
+
+    expect(result.variants[0].items.map((item) => item.xmlId)).not.toContain("lenta:2");
+    expect(result.variants[0].items.find((item) => item.xmlId === "lenta:1")).toMatchObject({ priceRub: 99, priceObservedAt: "2026-08-29T10:00:00.000Z" });
+    expect(result.variants[0].totalRub).toBe(469);
+    expect(result.variants[0].warnings).toContain("Часть товаров Ленты больше недоступна.");
   });
 });
