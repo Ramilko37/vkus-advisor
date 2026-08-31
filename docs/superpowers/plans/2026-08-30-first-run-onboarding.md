@@ -15,7 +15,7 @@
 - Russian-first copy from the approved spec.
 - Mobile-first, sticky 48px CTA, minimum 44px touch targets, existing white/pale-green/grocery-green visual system.
 - Guest flow must reach the first basket without authentication.
-- Address is the only global catalog prerequisite; `lentaStoreId` is conditional to Lenta.
+- A valid address and the automatically resolved nearest `lentaStoreId` are required before onboarding can continue.
 - Profile remains the single source for address, household size, excluded ingredients, and preferences.
 - Request-specific budget, days, meals, and cooking time never become profile fields.
 - First request completion launches the existing planner; no separate completion screen.
@@ -91,7 +91,7 @@
 - [ ] Add a failing request-step test proving profile defaults are summarized and the first request calls the supplied submit callback.
 - [ ] Run the onboarding component test and confirm failures are feature-related.
 - [ ] Implement the four steps using one draft `UserProfile`, the approved Russian copy, a progress indicator, Back, first-step dismiss, scrollable content, and sticky CTA.
-- [ ] Use debounced automatic store lookup after a valid address; auto-select the sole/clearly nearest result; allow continuation with address even without Lenta.
+- [ ] Use debounced automatic store lookup after a valid address; always select the nearest result and never continue without a resolved Lenta store.
 - [ ] Reuse `ChatComposer` for the request step and persist every request edit through onboarding state.
 - [ ] Add mobile-first CSS using existing tokens, 44px targets, safe-area padding, 320px support, and the existing 720px enhancement breakpoint.
 - [ ] Run the onboarding tests and confirm green.

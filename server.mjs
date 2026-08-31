@@ -80,6 +80,8 @@ export async function handleRequest(req, res) {
     });
     if (url.pathname === "/api/llm" && req.method === "POST") return await handleLlm(req, res);
     if (url.pathname === "/api/openrouter" && req.method === "POST") return await handleOpenRouter(req, res);
+    if (url.pathname === "/api/address/suggest" && req.method === "POST") return await handleAddressSuggest(req, res);
+    if (url.pathname === "/api/address/geolocate" && req.method === "POST") return await handleAddressGeolocate(req, res);
     if (url.pathname === "/api/catalog/status") return await handleCatalogStatus(res);
     if (url.pathname === "/api/catalog/lenta/stores" && req.method === "POST") return await handleLentaStores(req, res);
     if (url.pathname === "/api/catalog/search" && req.method === "POST") return await handleCatalogSearch(req, res);
@@ -90,6 +92,74 @@ export async function handleRequest(req, res) {
   } catch (error) {
     send(res, error?.status || 500, { error: error instanceof Error ? error.message : "Server error" });
   }
+}
+
+async function handleAddressSuggest(req, res) {
+  const { query } = await readJson(req);
+  const normalizedQuery = cleanText(stringValue(query)).slice(0, 300);
+  if (normalizedQuery.length < 3) return send(res, 200, { suggestions: [] });
+  return send(res, 200, {
+    suggestions: await requestDadataAddresses(
+      "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address",
+      { query: normalizedQuery, count: 5 },
+    ),
+  });
+}
+
+async function handleAddressGeolocate(req, res) {
+  const { lat, lon } = await readJson(req);
+  const latitude = Number(lat);
+  const longitude = Number(lon);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return send(res, 400, { error: "Invalid coordinates" });
+  }
+  return send(res, 200, {
+    suggestions: await requestDadataAddresses(
+      "https://suggestions.dadata.ru/suggestions/api/4_1/rs/geolocate/address",
+      { lat: latitude, lon: longitude, count: 5, radius_meters: 100 },
+    ),
+  });
+}
+
+async function requestDadataAddresses(url, body) {
+  const suggestions = await requestDadataSuggestions(url, body);
+  return suggestions.map((suggestion) => cleanText(stringValue(suggestion?.value))).filter(Boolean);
+}
+
+async function requestDadataSuggestions(url, body) {
+  const apiKey = process.env.DADATA_API_KEY;
+  if (!apiKey) {
+    const error = new Error("Address suggestions are not configured");
+    error.status = 503;
+    throw error;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (cause) {
+    const error = new Error(cause?.name === "AbortError" ? "Address service timeout" : "Address service unavailable");
+    error.status = cause?.name === "AbortError" ? 504 : 502;
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.ok) {
+    const error = new Error("Address service unavailable");
+    error.status = response.status === 429 ? 429 : 502;
+    throw error;
+  }
+  const payload = await response.json();
+  return Array.isArray(payload?.suggestions) ? payload.suggestions.slice(0, 5) : [];
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -549,8 +619,25 @@ async function handleLentaStores(req, res) {
   const body = await readJson(req);
   const address = cleanText(stringValue(body.address));
   if (!address) return send(res, 400, { error: "Delivery address is required" });
-  const stores = await createConfiguredLentaAdapter().listStores(address);
+  const adapter = createConfiguredLentaAdapter();
+  let stores = await adapter.listStores(address);
+  if (!stores.length && process.env.DADATA_API_KEY) {
+    const coordinates = await geocodeWithDadata(address);
+    if (coordinates) stores = await adapter.listStores(`${coordinates.latitude},${coordinates.longitude}`);
+  }
   return send(res, 200, { stores });
+}
+
+async function geocodeWithDadata(address) {
+  const [suggestion] = await requestDadataSuggestions(
+    "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address",
+    { query: address, count: 1 },
+  );
+  const latitude = Number(suggestion?.data?.geo_lat);
+  const longitude = Number(suggestion?.data?.geo_lon);
+  return Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180
+    ? { latitude, longitude }
+    : null;
 }
 
 async function handleCatalogDetails(url, res) {

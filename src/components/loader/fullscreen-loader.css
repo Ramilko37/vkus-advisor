@@ -152,8 +152,8 @@
   position: relative;
   z-index: 2;
   align-self: center;
-  width: 176px;
-  height: 176px;
+  width: 264px;
+  height: 264px;
   pointer-events: none;
 }
 
@@ -261,8 +261,8 @@
   }
 
   .pixel-basket {
-    width: 148px;
-    height: 148px;
+    width: 222px;
+    height: 222px;
   }
 }
 

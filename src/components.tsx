@@ -142,7 +142,7 @@ export function ProfileControl({
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    const nextProfile = normalizeProfile(draft);
+    let nextProfile = normalizeProfile(draft);
     if (nextProfile.address && nextProfile.address.length < 5) {
       setSaveStatus("error");
       setSaveError("Адрес выглядит слишком коротким. Укажите город, улицу и дом.");
@@ -151,6 +151,26 @@ export function ProfileControl({
     setSaveStatus("saving");
     setSaveError(null);
     try {
+      if (nextProfile.address && !nextProfile.lentaStoreId) {
+        setStoreStatus("loading");
+        const stores = await findLentaStores(nextProfile.address);
+        const nearest = stores[0];
+        setLentaStores(stores);
+        if (!nearest) {
+          setStoreStatus("empty");
+          setSaveStatus("error");
+          setSaveError("Не удалось подобрать магазин Ленты. Уточните адрес или повторите поиск.");
+          return;
+        }
+        nextProfile = normalizeProfile({
+          ...nextProfile,
+          lentaStoreId: nearest.id,
+          lentaStoreName: nearest.name,
+          lentaStoreAddress: nearest.address,
+        });
+        setDraft(nextProfile);
+        setStoreStatus("ready");
+      }
       await onChange(nextProfile);
       setSaveStatus("saved");
       setToast("Профиль сохранён");
@@ -183,6 +203,7 @@ export function ProfileControl({
       const stores = await findLentaStores(address);
       setLentaStores(stores);
       setStoreStatus(stores.length ? "ready" : "empty");
+      if (stores[0]) selectLentaStore(stores[0]);
     } catch {
       setStoreStatus("error");
       setSaveError("Не удалось найти магазины Ленты. Проверьте адрес и повторите.");

@@ -126,6 +126,7 @@
 .onboarding__field { display: grid; gap: 8px; margin-bottom: 20px; font-weight: 800; }
 .onboarding__field > small { color: var(--text-secondary); font-size: 13px; font-weight: 500; }
 .onboarding__field > input,
+.onboarding__address-input,
 .onboarding__tag-input {
   width: 100%;
   min-height: 56px;
@@ -133,10 +134,41 @@
   border-radius: var(--radius-control);
   background: var(--surface);
 }
-.onboarding__field > input { padding: 0 16px; }
-.onboarding__field > input:focus { border-color: var(--accent); }
-.onboarding__field > input[aria-invalid="true"] { border-color: var(--error); }
+.onboarding__field > input,
+.onboarding__address-input { padding: 0 16px; }
+.onboarding__field > input:focus,
+.onboarding__address-input:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 20%, transparent); outline-offset: 1px; }
+.onboarding__field > input[aria-invalid="true"],
+.onboarding__address-input[aria-invalid="true"] { border-color: var(--error); }
 .onboarding__field-error { margin: -12px 0 20px; color: var(--error); font-size: 13px; }
+
+.onboarding__address-field { position: relative; }
+.onboarding__address-control { position: relative; }
+.onboarding__address-input { display: block; padding-right: 48px; font: inherit; font-weight: 500; }
+.onboarding__address-loader { position: absolute; top: 17px; right: 16px; width: 22px; height: 22px; color: var(--accent); }
+.onboarding__suggestions {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 4;
+  max-height: min(280px, 38dvh);
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: 0 14px 36px rgba(20, 45, 25, .16);
+  list-style: none;
+}
+.onboarding__suggestions li { display: flex; min-height: 48px; gap: 10px; padding: 10px; align-items: flex-start; border-radius: 12px; font-weight: 500; line-height: 1.35; cursor: pointer; }
+.onboarding__suggestions li:hover,
+.onboarding__suggestions li.is-active { background: var(--accent-soft); }
+.onboarding__suggestions svg { width: 19px; height: 19px; margin-top: 1px; flex: 0 0 auto; color: var(--accent); }
+.onboarding__detect-address { display: inline-flex; width: fit-content; min-height: 44px; gap: 8px; padding: 0; align-items: center; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 800; text-align: left; cursor: pointer; }
+.onboarding__detect-address:disabled { opacity: .65; cursor: wait; }
+.onboarding__detect-address svg { width: 19px; height: 19px; flex: 0 0 auto; }
 
 .onboarding__store-status { min-height: 88px; }
 .onboarding__store-status > p { padding: 14px 0; color: var(--text-secondary); }

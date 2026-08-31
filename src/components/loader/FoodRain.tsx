@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Muta
 import type { WorkflowStage } from "../../types/domain";
 import { pickFoodSprite, type FoodSpriteDefinition } from "./foodSprites";
 import { BASKET_SLOTS, MAX_FALLING_SPRITES, spawnKind, stageFillCap } from "./loaderModel";
-import { spriteStyle } from "./spriteStyle";
+import { FOOD_SPRITE_SCALE, spriteStyle } from "./spriteStyle";
 
 interface FallingFood {
   id: number;
@@ -89,7 +89,7 @@ function createFlight(kind: "catch" | "miss", fast: boolean, basketRef: RefObjec
   recentRef.current = [...recentRef.current.slice(-1), sprite.id];
   const id = ++sequenceRef.current;
   const mobile = window.innerWidth < 600;
-  const size = mobile && sprite.size === 48 ? 40 : sprite.size;
+  const size = (mobile && sprite.size === 48 ? 40 : sprite.size) * FOOD_SPRITE_SCALE;
   const fromLeft = Math.random() < 0.5;
   const startX = window.innerWidth * randomBetween(fromLeft ? 0.12 : 0.75, fromLeft ? 0.25 : 0.88);
   const basket = basketRef.current?.getBoundingClientRect();

@@ -96,6 +96,9 @@ describe("App first-run onboarding", () => {
   });
 
   it("preserves a Home request through required delivery setup", async () => {
+    mocks.findLentaStores.mockResolvedValue([
+      { id: "525", name: "ТК1453", address: "Москва, Овчинниковская наб., 22/24с1", distanceMeters: 1127 },
+    ]);
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Пропустить настройку" }));
     fireEvent.change(screen.getByLabelText("Что собрать?"), { target: { value: "ужины на три дня" } });
@@ -103,8 +106,8 @@ describe("App first-run onboarding", () => {
 
     expect(screen.getByRole("heading", { name: "Где вы покупаете продукты?" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Вавилова 19" } });
-    expect(await screen.findByText("Не нашли подходящий магазин для этого адреса")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Продолжить без Ленты" }));
+    expect(await screen.findByText("ТК1453, Москва, Овчинниковская наб., 22/24с1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
     fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Первоначальная настройка" })).not.toBeInTheDocument());

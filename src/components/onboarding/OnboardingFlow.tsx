@@ -1,7 +1,7 @@
-import { Check, ChevronLeft, Minus, Plus, ShoppingBasket, X } from "lucide-react";
+import { Check, ChevronLeft, Loader2, MapPin, Minus, Plus, ShoppingBasket, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { useOnboarding } from "../../hooks/useOnboarding";
-import { findLentaStores } from "../../services/catalog";
+import { findLentaStores, reverseGeocodeAddress, suggestAddresses } from "../../services/catalog";
 import { trackProductEvent } from "../../services/productAnalytics";
 import { normalizeProfile } from "../../services/profileRepository";
 import type { LentaStore, OnboardingStep, UserProfile } from "../../types/domain";
@@ -16,6 +16,13 @@ interface OnboardingFlowProps {
 }
 
 const steps: OnboardingStep[] = ["value", "delivery", "profile"];
+const geoStatusCopy = {
+  ready: "Адрес определён.",
+  empty: "Не удалось найти адрес в этой точке — введите его вручную.",
+  denied: "Доступ к геопозиции запрещён — введите адрес вручную.",
+  unsupported: "Браузер не поддерживает геолокацию — введите адрес вручную.",
+  error: "Не удалось определить адрес — попробуйте ещё раз или введите его вручную.",
+};
 
 export function OnboardingFlow({ onboarding, profile, onProfileChange }: OnboardingFlowProps) {
   const [draft, setDraft] = useState(() => normalizeProfile(profile));
@@ -163,6 +170,11 @@ function ValueStep({ onStart }: { onStart: () => void }) {
 function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile; onChange: (profile: UserProfile) => void; onContinue: () => void }) {
   const [stores, setStores] = useState<LentaStore[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "empty" | "error">("idle");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [suggestionStatus, setSuggestionStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  const [geoStatus, setGeoStatus] = useState<"idle" | "loading" | "ready" | "empty" | "denied" | "unsupported" | "error">("idle");
   const [retry, setRetry] = useState(0);
   const [addressTouched, setAddressTouched] = useState(false);
   const address = profile.address.trim();
@@ -170,8 +182,41 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
   const profileRef = useRef(profile);
   const onChangeRef = useRef(onChange);
   const addressRef = useRef<HTMLInputElement>(null);
+  const selectedAddressRef = useRef("");
   profileRef.current = profile;
   onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (address.length < 3 || selectedAddressRef.current === profile.address) {
+      selectedAddressRef.current = "";
+      setSuggestions([]);
+      setSuggestionsOpen(false);
+      setSuggestionStatus("idle");
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setSuggestionStatus("loading");
+      try {
+        const next = await suggestAddresses(address, controller.signal);
+        if (controller.signal.aborted) return;
+        const values = Array.isArray(next) ? next : [];
+        setSuggestions(values);
+        setSuggestionsOpen(values.length > 0);
+        setActiveSuggestion(-1);
+        setSuggestionStatus("idle");
+      } catch {
+        if (controller.signal.aborted) return;
+        setSuggestions([]);
+        setSuggestionsOpen(false);
+        setSuggestionStatus("error");
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [address, profile.address]);
 
   useEffect(() => {
     if (!validAddress) {
@@ -187,7 +232,7 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
         const nextStores = await findLentaStores(address, controller.signal);
         setStores(nextStores);
         setStatus(nextStores.length ? "ready" : "empty");
-        if (nextStores.length === 1) {
+        if (nextStores.length) {
           onChangeRef.current(withStore(profileRef.current, nextStores[0]));
           trackProductEvent("onboarding_store_selected", { retailer: "lenta", automatic: true });
         }
@@ -202,22 +247,118 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
     };
   }, [address, retry, validAddress]);
 
-  const updateAddress = (value: string) => onChange(normalizeProfile({
-    ...profile,
+  const updateAddress = (value: string) => onChangeRef.current({
+    ...profileRef.current,
     address: value,
     lentaStoreId: undefined,
     lentaStoreName: undefined,
     lentaStoreAddress: undefined,
-  }));
+  });
+
+  const selectAddress = (value: string) => {
+    selectedAddressRef.current = value;
+    setSuggestions([]);
+    setSuggestionsOpen(false);
+    setActiveSuggestion(-1);
+    updateAddress(value);
+  };
+
+  const handleAddressKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      setSuggestionsOpen(false);
+      return;
+    }
+    if (!suggestions.length || (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter")) return;
+    event.preventDefault();
+    if (event.key === "Enter") {
+      selectAddress(suggestions[Math.max(activeSuggestion, 0)]);
+      return;
+    }
+    setSuggestionsOpen(true);
+    setActiveSuggestion((current) => event.key === "ArrowDown"
+      ? (current + 1) % suggestions.length
+      : (current <= 0 ? suggestions.length - 1 : current - 1));
+  };
+
+  const detectLocation = () => {
+    if (!navigator.geolocation) {
+      setGeoStatus("unsupported");
+      return;
+    }
+    setGeoStatus("loading");
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        void reverseGeocodeAddress(coords.latitude, coords.longitude).then((next) => {
+          if (!next.length) {
+            setGeoStatus("empty");
+            return;
+          }
+          selectAddress(next[0]);
+          setGeoStatus("ready");
+        }).catch(() => setGeoStatus("error"));
+      },
+      (error) => setGeoStatus(error.code === error.PERMISSION_DENIED ? "denied" : "error"),
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
+    );
+  };
 
   return (
     <section className="onboarding__content">
       <h1 id="onboarding-title" tabIndex={-1}>Где вы покупаете продукты?</h1>
       <p className="onboarding__lead">Адрес нужен, чтобы показывать реальные товары, цены и ассортимент рядом с вами.</p>
-      <label className="onboarding__field">
-        <span>Адрес</span>
-        <input ref={addressRef} value={profile.address} onBlur={() => setAddressTouched(true)} onChange={(event) => updateAddress(event.target.value)} placeholder="Москва, улица, дом" autoComplete="street-address" aria-invalid={addressTouched && !validAddress} aria-describedby={addressTouched && !validAddress ? "onboarding-address-error" : undefined} />
-      </label>
+      <div className="onboarding__field onboarding__address-field">
+        <label htmlFor="onboarding-address">Адрес</label>
+        <div className="onboarding__address-control">
+          <input
+            id="onboarding-address"
+            ref={addressRef}
+            className="onboarding__address-input"
+            value={profile.address}
+            onBlur={() => {
+              setAddressTouched(true);
+              window.setTimeout(() => setSuggestionsOpen(false), 100);
+            }}
+            onChange={(event) => updateAddress(event.target.value)}
+            onFocus={() => suggestions.length && setSuggestionsOpen(true)}
+            onKeyDown={handleAddressKeyDown}
+            placeholder="Москва, улица, дом"
+            autoComplete="street-address"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={suggestionsOpen && suggestions.length > 0}
+            aria-controls="onboarding-address-suggestions"
+            aria-activedescendant={activeSuggestion >= 0 ? `onboarding-address-suggestion-${activeSuggestion}` : undefined}
+            aria-invalid={addressTouched && !validAddress}
+            aria-describedby={addressTouched && !validAddress ? "onboarding-address-error" : undefined}
+          />
+          {suggestionStatus === "loading" && <Loader2 className="onboarding__address-loader spin" aria-label="Ищем адреса" />}
+          {suggestionsOpen && suggestions.length > 0 && (
+            <ul id="onboarding-address-suggestions" className="onboarding__suggestions" role="listbox">
+              {suggestions.map((suggestion, index) => (
+                <li
+                  id={`onboarding-address-suggestion-${index}`}
+                  key={suggestion}
+                  className={index === activeSuggestion ? "is-active" : ""}
+                  role="option"
+                  aria-selected={index === activeSuggestion}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectAddress(suggestion)}
+                >
+                  <MapPin aria-hidden="true" />
+                  <span>{suggestion}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <button className="onboarding__detect-address" type="button" onClick={detectLocation} disabled={geoStatus === "loading"}>
+          {geoStatus === "loading" ? <Loader2 className="spin" aria-hidden="true" /> : <MapPin aria-hidden="true" />}
+          {geoStatus === "loading" ? "Определяем адрес…" : "Определить адрес автоматически"}
+        </button>
+        {suggestionStatus === "error" && <small role="status">Подсказки временно недоступны — адрес можно ввести вручную.</small>}
+        {geoStatus !== "idle" && geoStatus !== "loading" && <small role="status">{geoStatusCopy[geoStatus]}</small>}
+      </div>
       {addressTouched && !validAddress && <p id="onboarding-address-error" className="onboarding__field-error">Укажите улицу и номер дома.</p>}
 
       <div className="onboarding__store-status" aria-live="polite">
@@ -229,7 +370,7 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
         )}
         {status === "ready" && stores.length > 1 && (
           <fieldset className="onboarding__store-list">
-            <legend>Выберите ближайший магазин Ленты</legend>
+            <legend>Ближайший магазин выбран автоматически</legend>
             {stores.map((store) => (
               <label key={store.id}>
                 <input type="radio" name="lenta-store" checked={profile.lentaStoreId === store.id} onChange={() => {
@@ -244,14 +385,14 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
       </div>
 
       <div className="onboarding__footer">
-        <p>Если Ленты рядом нет, всё равно покажем результаты других магазинов.</p>
+        <p>Подберём ближайшую Ленту по адресу. При необходимости магазин можно изменить.</p>
         <button
           className="onboarding__primary"
           type="button"
-          disabled={!validAddress || status === "idle" || status === "loading" || (status === "ready" && stores.length > 1 && !profile.lentaStoreId)}
+          disabled={!validAddress || status !== "ready" || !profile.lentaStoreId}
           onClick={onContinue}
         >
-          {status === "empty" || status === "error" ? "Продолжить без Ленты" : "Продолжить"}
+          Продолжить
         </button>
       </div>
     </section>

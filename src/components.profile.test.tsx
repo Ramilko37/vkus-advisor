@@ -74,7 +74,7 @@ describe("ProfileControl", () => {
     }));
   });
 
-  it("saves an address without requiring a Lenta store", async () => {
+  it("automatically saves the nearest Lenta store with a new address", async () => {
     const onChange = vi.fn();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -106,8 +106,38 @@ describe("ProfileControl", () => {
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       address: "Москва, Тверская 1",
+      lentaStoreId: "525",
+      lentaStoreName: "ТК1453",
+      lentaStoreAddress: "Москва, Овчинниковская наб., 22/24с1",
     })));
-    expect(onChange.mock.calls[0][0]).not.toHaveProperty("lentaStoreId");
+  });
+
+  it("does not save a delivery address without a resolved Lenta store", async () => {
+    const onChange = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ stores: [] }),
+    }));
+    render(
+      <ProfileControl
+        profile={DEFAULT_PROFILE}
+        authConfigured={false}
+        authStatus="guest"
+        authError={null}
+        onChange={onChange}
+        onSendOtp={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Вавилова 19" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+
+    expect(await screen.findByText("Не удалось подобрать магазин Ленты. Уточните адрес или повторите поиск.")).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Профиль" })).toBeInTheDocument();
   });
 
   it("shows Email OTP entry when Supabase auth is configured", () => {

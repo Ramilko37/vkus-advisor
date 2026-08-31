@@ -69,6 +69,26 @@ export async function findLentaStores(address: string, signal?: AbortSignal): Pr
   return response.stores;
 }
 
+export async function suggestAddresses(query: string, signal?: AbortSignal): Promise<string[]> {
+  const response = await fetchJson<{ suggestions: string[] }>("/api/address/suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+    signal,
+  });
+  return response.suggestions;
+}
+
+export async function reverseGeocodeAddress(lat: number, lon: number, signal?: AbortSignal): Promise<string[]> {
+  const response = await fetchJson<{ suggestions: string[] }>("/api/address/geolocate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lat, lon }),
+    signal,
+  });
+  return response.suggestions;
+}
+
 function lentaStorePayload(profile: UserProfile) {
   return {
     lentaStoreId: /^ТК(\d+)$/i.exec(profile.lentaStoreName?.trim() || "")?.[1] || profile.lentaStoreId,

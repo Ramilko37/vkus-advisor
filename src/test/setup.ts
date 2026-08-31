@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 
-if (!window.localStorage) {
+if (typeof window !== "undefined" && !window.localStorage) {
   const values = new Map<string, string>();
   Object.defineProperty(window, "localStorage", {
     value: {
