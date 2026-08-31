@@ -4,7 +4,7 @@ import type { BasketItem, BasketVariant, CheckoutResult, LentaStore, RetailerRes
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
 import type { AuthStatus } from "./hooks/useAuthProfile";
 import { normalizeProfile } from "./services/profileRepository";
-import { findLentaStores } from "./services/catalog";
+import { findLentaStores, suggestAddresses } from "./services/catalog";
 import { getVariantPresentation } from "./services/variantPresentation";
 import { summarizeIntentSlots } from "./services/requestCopy";
 
@@ -128,9 +128,13 @@ export function ProfileControl({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lentaStores, setLentaStores] = useState<LentaStore[]>([]);
   const [storeStatus, setStoreStatus] = useState<"idle" | "loading" | "ready" | "empty" | "error">("idle");
+  const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
+  const [addressSuggestionsOpen, setAddressSuggestionsOpen] = useState(false);
+  const [addressSuggestionStatus, setAddressSuggestionStatus] = useState<"idle" | "loading" | "error">("idle");
   const [toast, setToast] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLFormElement>(null);
+  const selectedAddressRef = useRef("");
   const hasAddress = profile.address.length > 0;
   const normalizedDraft = useMemo(() => normalizeProfile(draft), [draft]);
   const normalizedProfile = useMemo(() => normalizeProfile(profile), [profile]);
@@ -189,6 +193,12 @@ export function ProfileControl({
     setLentaStores([]);
     setStoreStatus("idle");
     setSaveError(null);
+  };
+  const selectAddress = (address: string) => {
+    selectedAddressRef.current = address;
+    setAddressSuggestions([]);
+    setAddressSuggestionsOpen(false);
+    changeAddress(address);
   };
   const loadLentaStores = async () => {
     const address = normalizedDraft.address;
@@ -265,8 +275,42 @@ export function ProfileControl({
       setSaveError(null);
       setLentaStores([]);
       setStoreStatus("idle");
+      setAddressSuggestions([]);
+      setAddressSuggestionsOpen(false);
+      setAddressSuggestionStatus("idle");
     }
   }, [open, profile]);
+
+  useEffect(() => {
+    const query = draft.address.trim();
+    if (!open || query.length < 3 || selectedAddressRef.current === draft.address) {
+      selectedAddressRef.current = "";
+      setAddressSuggestions([]);
+      setAddressSuggestionsOpen(false);
+      setAddressSuggestionStatus("idle");
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setAddressSuggestionStatus("loading");
+      try {
+        const suggestions = await suggestAddresses(query, controller.signal);
+        if (controller.signal.aborted) return;
+        setAddressSuggestions(suggestions);
+        setAddressSuggestionsOpen(suggestions.length > 0);
+        setAddressSuggestionStatus("idle");
+      } catch {
+        if (controller.signal.aborted) return;
+        setAddressSuggestions([]);
+        setAddressSuggestionsOpen(false);
+        setAddressSuggestionStatus("error");
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [draft.address, open]);
 
   return (
     <>
@@ -314,14 +358,45 @@ export function ProfileControl({
                 <h3 id="profile-address-title">Адрес доставки</h3>
                 <p className="profile-dialog-copy">Нужен для поиска товаров в ближайших магазинах.</p>
                 <label htmlFor="profile-address">Адрес</label>
-                <input
-                  id="profile-address"
-                  value={draft.address}
-                  onChange={(event) => changeAddress(event.target.value)}
-                  placeholder="Москва, улица, дом"
-                  autoComplete="street-address"
-                  autoFocus
-                />
+                <div className="profile-address-control">
+                  <input
+                    id="profile-address"
+                    value={draft.address}
+                    onChange={(event) => {
+                      selectedAddressRef.current = "";
+                      setAddressSuggestionsOpen(false);
+                      changeAddress(event.target.value);
+                    }}
+                    onFocus={() => addressSuggestions.length && setAddressSuggestionsOpen(true)}
+                    onBlur={() => window.setTimeout(() => setAddressSuggestionsOpen(false), 100)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape" && addressSuggestionsOpen) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setAddressSuggestionsOpen(false);
+                      }
+                    }}
+                    placeholder="Москва, улица, дом"
+                    autoComplete="street-address"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={addressSuggestionsOpen}
+                    aria-controls="profile-address-suggestions"
+                    autoFocus
+                  />
+                  {addressSuggestionStatus === "loading" && <Loader2 className="profile-address-loader spin" aria-label="Ищем адреса" />}
+                  {addressSuggestionsOpen && (
+                    <ul id="profile-address-suggestions" className="profile-address-suggestions" role="listbox">
+                      {addressSuggestions.map((suggestion) => (
+                        <li key={suggestion} role="option" aria-selected="false" onMouseDown={(event) => event.preventDefault()} onClick={() => selectAddress(suggestion)}>
+                          <MapPin aria-hidden="true" />
+                          <span>{suggestion}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                {addressSuggestionStatus === "error" && <p className="profile-dialog-copy" role="status">Подсказки временно недоступны — адрес можно ввести вручную.</p>}
                 {draft.lentaStoreId && (
                   <div className="profile-selected-store">
                     <strong>{draft.lentaStoreName || "Магазин Ленты"}</strong>

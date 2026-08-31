@@ -399,6 +399,65 @@ button:disabled {
   background: rgba(255, 255, 255, 0.82);
 }
 
+.profile-address-control {
+  position: relative;
+}
+
+.profile-address-control > input {
+  width: 100%;
+  padding-right: 48px;
+}
+
+.profile-address-loader {
+  position: absolute;
+  top: 17px;
+  right: 16px;
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+}
+
+.profile-address-suggestions {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 20;
+  max-height: min(280px, 38dvh);
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: 0 14px 36px rgba(20, 45, 25, .16);
+  list-style: none;
+}
+
+.profile-address-suggestions li {
+  display: flex;
+  min-height: 48px;
+  gap: 10px;
+  padding: 10px;
+  align-items: flex-start;
+  border-radius: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.profile-address-suggestions li:hover {
+  background: var(--accent-soft);
+}
+
+.profile-address-suggestions svg {
+  width: 19px;
+  height: 19px;
+  margin-top: 1px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
 .profile-location-button {
   width: fit-content;
   margin-top: var(--space-1);

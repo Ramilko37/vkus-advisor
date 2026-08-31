@@ -140,6 +140,31 @@ describe("ProfileControl", () => {
     expect(screen.getByRole("dialog", { name: "Профиль" })).toBeInTheDocument();
   });
 
+  it("shows DaData suggestions in the profile address input", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ suggestions: ["г Москва, ул Тверская, д 1"] }),
+    }));
+    render(
+      <ProfileControl
+        profile={DEFAULT_PROFILE}
+        authConfigured={false}
+        authStatus="guest"
+        authError={null}
+        onChange={vi.fn()}
+        onSendOtp={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва Твер" } });
+    fireEvent.click(await screen.findByRole("option", { name: "г Москва, ул Тверская, д 1" }));
+
+    expect(screen.getByLabelText("Адрес")).toHaveValue("г Москва, ул Тверская, д 1");
+  });
+
   it("shows Email OTP entry when Supabase auth is configured", () => {
     const onSendOtp = vi.fn();
     render(
