@@ -30,6 +30,23 @@ describe("DaData server proxy", () => {
     );
   });
 
+  it("exposes address suggestions through Vercel functions", async () => {
+    process.env.DADATA_API_KEY = "server-only-token";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ suggestions: [{ value: "г Москва, ул Тверская, д 1" }] }),
+    }));
+    const suggestRoute = await import("../../api/address/suggest.mjs").catch(() => null);
+    const geolocateRoute = await import("../../api/address/geolocate.mjs").catch(() => null);
+
+    expect(suggestRoute?.default).toBeTypeOf("function");
+    expect(geolocateRoute?.default).toBeTypeOf("function");
+    await expect(post(suggestRoute.default, "/api/address/suggest", { query: "Москва Твер" })).resolves.toEqual({
+      status: 200,
+      body: { suggestions: ["г Москва, ул Тверская, д 1"] },
+    });
+  });
+
   it("reverse geocodes browser coordinates through DaData", async () => {
     process.env.DADATA_API_KEY = "server-only-token";
     const fetchMock = vi.fn().mockResolvedValue({
