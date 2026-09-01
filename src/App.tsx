@@ -6,7 +6,6 @@ import { OnboardingFlow } from "./components/onboarding/OnboardingFlow";
 import { useAuthProfile } from "./hooks/useAuthProfile";
 import { useBasketPlanner } from "./hooks/useBasketPlanner";
 import { useOnboarding } from "./hooks/useOnboarding";
-import { trackProductEvent } from "./services/productAnalytics";
 import { registerWebMcpTools } from "./services/webMcpTools";
 import type { WorkflowStage } from "./types/domain";
 
@@ -24,10 +23,6 @@ export function App() {
   const hasResults = planner.state.variants.length > 0;
   const onboarding = useOnboarding({ ready: authProfile.authStatus !== "loading" });
   const { mockResults } = planner;
-  const firstBasketsTracked = useRef(false);
-  const firstVariantOpenedTracked = useRef(false);
-  const firstBasketEditedTracked = useRef(false);
-  const firstCheckoutTracked = useRef(false);
   const appContentRef = useRef<HTMLDivElement>(null);
   const loading = loadingStages.includes(planner.state.stage);
   const loaderVisual = useLoaderVisualState(planner.state.stage, hasResults);
@@ -70,12 +65,6 @@ export function App() {
   }, [debugResults, hasResults, loading, mockResults, route]);
 
   useEffect(() => {
-    if (planner.state.stage !== "ready" || !hasResults || !onboarding.showResultsHint || firstBasketsTracked.current) return;
-    firstBasketsTracked.current = true;
-    trackProductEvent("first_baskets_ready");
-  }, [hasResults, onboarding.showResultsHint, planner.state.stage]);
-
-  useEffect(() => {
     if (onboarding.visible) appContentRef.current?.setAttribute("inert", "");
     else appContentRef.current?.removeAttribute("inert");
   }, [onboarding.visible]);
@@ -83,7 +72,7 @@ export function App() {
   return (
     <>
       <div ref={appContentRef} aria-hidden={onboarding.visible || undefined}>
-        <AppShell route={route} authProfile={authProfile} onOpenOnboarding={onboarding.replay}>
+        <AppShell route={route} authProfile={authProfile} onOpenOnboarding={onboarding.replay} onOpenDelivery={() => onboarding.openDelivery()}>
           {route === "results" ? (
             hasResults ? (
               <BasketResults
@@ -95,21 +84,6 @@ export function App() {
                 onStartNewSearch={() => {
                   planner.reset();
                   openHome();
-                }}
-                onVariantOpen={(retailer) => {
-                  if (firstVariantOpenedTracked.current) return;
-                  firstVariantOpenedTracked.current = true;
-                  trackProductEvent("first_variant_opened", { retailer });
-                }}
-                onBasketEdit={(retailer) => {
-                  if (firstBasketEditedTracked.current) return;
-                  firstBasketEditedTracked.current = true;
-                  trackProductEvent("first_basket_edited", { retailer });
-                }}
-                onCheckoutClick={(retailer) => {
-                  if (firstCheckoutTracked.current) return;
-                  firstCheckoutTracked.current = true;
-                  trackProductEvent("first_checkout_clicked", { retailer });
                 }}
               />
             ) : loading || debugResults ? (
@@ -123,7 +97,7 @@ export function App() {
               hasDeliveryAddress={Boolean(authProfile.profile.address.trim())}
               draft={onboarding.state.requestDraft}
               onDraftChange={onboarding.setRequestDraft}
-              onNeedsDelivery={(request) => onboarding.open("delivery", request)}
+              onNeedsDelivery={(request) => onboarding.openDelivery(request)}
             />
           )}
         </AppShell>
@@ -141,6 +115,10 @@ export function App() {
           onboarding={onboarding}
           profile={authProfile.profile}
           onProfileChange={authProfile.updateProfile}
+          onDeliveryComplete={async (nextProfile, requestDraft) => {
+            if (!requestDraft.trim()) return;
+            await planner.submit(requestDraft, nextProfile);
+          }}
         />
       )}
     </>

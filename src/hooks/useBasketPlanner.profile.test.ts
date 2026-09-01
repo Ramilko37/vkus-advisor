@@ -32,6 +32,55 @@ describe("useBasketPlanner profile", () => {
     sessionStorage.clear();
   });
 
+
+  it("uses a freshly saved delivery profile for the pending request", async () => {
+    const override = {
+      ...DEFAULT_PROFILE,
+      address: "Москва, Вавилова 19",
+      lentaStoreId: "525",
+    };
+    mocks.generateStructured.mockResolvedValue({ data: testIntent(), model: "test-model" });
+    mocks.createCatalogClient.mockRejectedValue(new Error("stop after profile assertion"));
+    const { result } = renderHook(() => useBasketPlanner(DEFAULT_PROFILE));
+
+    await act(async () => {
+      await result.current.submit("ужины на три дня", override);
+    });
+
+    expect(mocks.createCatalogClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: "Москва, Вавилова 19",
+        lentaStoreId: "525",
+      }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("keeps the last valid intent and baskets when a follow-up fails", async () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Вавилова 19", lentaStoreId: "525" };
+    mocks.createCatalogClient.mockResolvedValue({
+      mode: "live",
+      searchProducts: vi.fn().mockRejectedValue(new Error("catalog unavailable")),
+      getProductDetails: vi.fn().mockResolvedValue({}),
+      createCartLink: vi.fn(),
+    });
+    const { result } = renderHook(() => useBasketPlanner(profile));
+
+    act(() => result.current.mockResults());
+    const previousIntent = structuredClone(result.current.state.intent);
+    const previousVariants = structuredClone(result.current.state.variants);
+    const previousRetailerResults = structuredClone(result.current.state.retailerResults);
+
+    await act(async () => {
+      await result.current.submit("теперь на 4 дня");
+    });
+
+    expect(result.current.state.error).not.toBeNull();
+    expect(result.current.state.intent).toEqual(previousIntent);
+    expect(result.current.state.variants).toEqual(previousVariants);
+    expect(result.current.state.retailerResults).toEqual(previousRetailerResults);
+  });
+
   it("passes the current profile to catalog reconnect", async () => {
     const profile = { ...DEFAULT_PROFILE, address: "Москва, Вавилова 19" };
     mocks.createCatalogClient.mockResolvedValue({
@@ -74,7 +123,7 @@ describe("useBasketPlanner profile", () => {
     expect(result.current.state.stage).toBe("error");
     expect(result.current.state.error).toEqual(expect.objectContaining({
       code: "missing_address",
-      message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.",
+      message: "Добавьте адрес доставки: он нужен, чтобы искать товары в доступных рядом магазинах.",
     }));
     expect(mocks.createCatalogClient).not.toHaveBeenCalled();
   });
@@ -193,7 +242,6 @@ describe("useBasketPlanner profile", () => {
     expect(validateBasketItems).toHaveBeenCalledWith([{ xmlId: "lenta:100", quantity: 2, priceRub: 100 }]);
     expect(createCartLink).not.toHaveBeenCalled();
     expect(checkout!).toEqual({
-      url: "https://lenta.com/basket/",
       items: [expect.objectContaining({ xmlId: "lenta:100", quantity: 2, priceRub: 125, role: "breakfast", reason: "Подходит под запрос" })],
     });
     expect(result.current.state.variants[0].totalRub).toBe(250);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeIntentSlots, validateBasketRequest } from "./requestCopy";
+import { summarizeIntentLine, summarizeIntentSlots, summarizeIntentTitle, validateBasketRequest } from "./requestCopy";
 import type { BasketIntent } from "../types/domain";
 
 describe("request copy", () => {
@@ -13,6 +13,15 @@ describe("request copy", () => {
 
   it("echoes extracted slots before catalog search", () => {
     expect(summarizeIntentSlots(intent)).toEqual(["2 чел.", "3 дня", "до 3 000 ₽", "без грибов", "ужин"]);
+  });
+
+  it("summarizes the resolved request for the results screen", () => {
+    expect(summarizeIntentTitle(intent)).toBe("Ужины на 3 дня");
+    expect(summarizeIntentLine(intent)).toBe("2 человека · до 3 000 ₽ · без грибов");
+  });
+
+  it("uses a generic basket title for multiple meals", () => {
+    expect(summarizeIntentTitle({ ...intent, meals: ["завтрак", "ужин"] })).toBe("Корзина на 3 дня");
   });
 });
 

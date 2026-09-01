@@ -1,0 +1,29 @@
+.pixel-basket-mark {
+  display: block;
+  color: var(--accent-deep, #0d3424);
+  fill: currentColor;
+  shape-rendering: crispEdges;
+  image-rendering: pixelated;
+}
+
+.pixel-basket-mark__accent {
+  fill: var(--deal, #85d90f);
+}
+
+.pixel-basket-mark--empty {
+  color: var(--text-muted, #748075);
+}
+
+.pixel-basket-mark--success {
+  animation: pixel-basket-success 520ms cubic-bezier(.2, .8, .2, 1) both;
+}
+
+@keyframes pixel-basket-success {
+  0% { transform: translateY(8px) scale(.92); opacity: 0; }
+  70% { transform: translateY(-4px) scale(1.05); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pixel-basket-mark--success { animation: none; }
+}

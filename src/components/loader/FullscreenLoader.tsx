@@ -6,6 +6,7 @@ import { FOOD_SPRITES, type FoodSpriteDefinition } from "./foodSprites";
 import { BASKET_SLOTS, stageFillCap } from "./loaderModel";
 import { PixelBasket } from "./PixelBasket";
 import { usePrefersReducedMotion } from "./useLoaderVisualState";
+import { PixelBasketMark } from "../brand/PixelBasketMark";
 import "./fullscreen-loader.css";
 
 const steps: Array<{ id: WorkflowStage; title: string; text: string }> = [
@@ -47,7 +48,14 @@ export function FullscreenLoader({ stage, intent, onCancel, finishing = false }:
       {!reducedMotion && <FoodRain stage={stage} finishing={finishing} landedCount={landed.length} basketRef={basketRef} onLand={land} />}
       <PixelBasket items={landed} basketRef={basketRef} bounceKey={bounceKey} finishing={finishing} />
       <section className="liquid-loader-card liquid-glass" aria-label="Прогресс подбора">
-        <h2>{stage === "creatingCart" ? "Готовим ссылку на корзину" : "Подбираем корзину"}</h2>
+        {finishing ? (
+          <div className="loader-finish-mark" role="status" aria-live="polite">
+            <PixelBasketMark size={72} state="success" decorative={false} />
+            <strong>Корзины готовы</strong>
+          </div>
+        ) : (
+          <h2>{stage === "creatingCart" ? "Готовим корзину" : "Подбираем корзину"}</h2>
+        )}
         {intent && (
           <div className="loader-slots" aria-label="Параметры запроса">
             {summarizeIntentSlots(intent).map((slot) => <span key={slot}>{slot}</span>)}

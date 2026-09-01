@@ -1,0 +1,115 @@
+.home-header {
+  display: grid;
+  gap: 28px;
+  margin-bottom: 20px;
+}
+
+.home-utility-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(116px, auto) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.brand-lockup {
+  min-width: 0;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  color: var(--accent-deep);
+}
+
+.brand-lockup strong {
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.delivery-control {
+  min-width: 0;
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--radius-control);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, .78);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+}
+
+.delivery-control > svg { flex: 0 0 auto; color: var(--accent); }
+.delivery-control span { min-width: 0; display: grid; text-align: left; }
+.delivery-control small { color: var(--text-muted); font-size: 11px; line-height: 1.2; }
+.delivery-control strong { max-width: 152px; overflow: hidden; color: var(--text-primary); font-size: 13px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+
+.home-utility-actions { display: flex; gap: 8px; align-items: center; }
+.home-icon-button,
+.home-utility-actions .profile-trigger {
+  position: static;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, .82);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+}
+
+.home-utility-actions .profile-trigger.has-address {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.home-value { display: grid; gap: 10px; }
+.home-value h1 { margin: 0; font-size: clamp(34px, 10vw, 46px); line-height: 1.04; letter-spacing: -.035em; text-wrap: balance; }
+.home-value p { max-width: 34ch; margin: 0; color: var(--text-secondary); font-size: 17px; line-height: 1.45; }
+
+.task-shortcuts { display: grid; gap: 10px; }
+.task-shortcuts > span { color: var(--text-secondary); font-size: 13px; font-weight: var(--font-weight-strong); }
+.task-shortcuts__list { display: flex; gap: 8px; flex-wrap: wrap; }
+.task-shortcuts button { min-height: 44px; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0 14px; background: var(--surface); color: var(--text-primary); font-weight: var(--font-weight-strong); box-shadow: var(--shadow-card); cursor: pointer; }
+.task-shortcuts button:hover { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
+
+.home-independent-note {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+@media (max-width: 420px) {
+  .home-utility-bar { grid-template-columns: minmax(0, 1fr) auto; }
+  .brand-lockup strong { font-size: 15px; }
+  .delivery-control { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+  .delivery-control strong { max-width: none; }
+  .home-utility-actions { grid-column: 2; grid-row: 1; }
+}
+
+.app-shell.home-route {
+  width: min(100%, 560px);
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+}
+
+.app-shell.home-route .workspace {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 720px) {
+  .app-shell.home-route {
+    margin-block: 28px;
+    padding: 28px;
+    border-radius: 28px;
+  }
+}

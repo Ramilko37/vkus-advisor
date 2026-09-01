@@ -65,6 +65,8 @@ describe("FullscreenLoader", () => {
     render(<FullscreenLoader stage="ready" intent={null} finishing onCancel={vi.fn()} />);
 
     expect(screen.queryByRole("button", { name: "Отменить" })).not.toBeInTheDocument();
+    expect(screen.getByText("Корзины готовы")).toBeInTheDocument();
+    expect(document.querySelector(".pixel-basket-mark--success")).not.toBeNull();
     act(() => vi.advanceTimersByTime(520));
     expect(document.querySelectorAll(".pixel-basket__item")).toHaveLength(12);
   });

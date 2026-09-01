@@ -8,6 +8,7 @@ import { measureStage } from "../services/pipelineMetrics";
 import { validateBasketRequest } from "../services/requestCopy";
 import { replaceBasketItem } from "../services/basketEditing";
 import { DEFAULT_PROFILE } from "../services/profileRepository";
+import { RETAILERS, type RetailerKey } from "../config/retailers";
 
 interface PlannerState {
   stage: WorkflowStage;
@@ -106,7 +107,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
     candidatePoolRef.current = null;
   }, [profile]);
 
-  const runWorkflow = useCallback(async (message: string) => {
+  const runWorkflow = useCallback(async (message: string, effectiveProfile: UserProfile) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     const requestId = crypto.randomUUID();
@@ -141,7 +142,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       const fastIntent = state.intent ? applyFastIntentPatch(message, state.intent) : null;
       const intentResult = fastIntent
         ? { data: normalizeBasketIntent(fastIntent), model: "", retryCount: 0, fallbackModelUsed: false, usage: undefined }
-        : (await measureStage(() => analyzeIntent(message, state.intent, basketSummary(selectedVariant(state)), llm, sessionId, controller.signal, profile))).result;
+        : (await measureStage(() => analyzeIntent(message, state.intent, basketSummary(selectedVariant(state)), llm, sessionId, controller.signal, effectiveProfile))).result;
       metrics.intentMs = fastIntent ? 0 : intentResult.durationMs || 0;
       metrics.intentModel = intentResult.model || undefined;
       metrics.intentPromptTokens = intentResult.usage?.promptTokens;
@@ -150,16 +151,16 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       metrics.intentRetryCount = intentResult.retryCount || 0;
       metrics.fallbackModelUsed = Boolean(intentResult.fallbackModelUsed);
       if (!isActive()) return;
-      dispatch({ type: "intent", intent: intentResult.data });
       if (intentResult.data.needsClarification && intentResult.data.clarificationQuestion) {
+        dispatch({ type: "intent", intent: intentResult.data });
         dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "assistant", content: intentResult.data.clarificationQuestion, createdAt: Date.now() } });
         return;
       }
       dispatch({ type: "stage", stage: "searching" });
-      const catalog = await getCatalogForProfile(catalogRef, catalogProfileKeyRef, profile, controller.signal);
+      const catalog = await getCatalogForProfile(catalogRef, catalogProfileKeyRef, effectiveProfile, controller.signal);
       dispatch({ type: "catalog", mode: catalog.mode });
       dispatch({ type: "stage", stage: "composing" });
-      const fingerprint = buildCatalogFingerprint(intentResult.data, profile.address);
+      const fingerprint = buildCatalogFingerprint(intentResult.data, effectiveProfile.address);
       const reusablePool = candidatePoolRef.current?.intentFingerprint === fingerprint ? candidatePoolRef.current.products : undefined;
       const measuredBasket = await measureStage(() => composeBaskets(intentResult.data, catalog, llm, sessionId, controller.signal, reusablePool));
       const result = measuredBasket.result;
@@ -188,9 +189,9 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       const appError = toAppError(error);
       dispatch({ type: "error", error: appError, pendingMessage: message });
     }
-  }, [llm, profile, sessionId, state]);
+  }, [llm, sessionId, state]);
 
-  const submit = useCallback(async (message: string) => {
+  const submit = useCallback(async (message: string, profileOverride?: UserProfile) => {
     const trimmed = message.trim();
     if (!trimmed) return;
     const validationError = state.intent ? null : validateBasketRequest(trimmed);
@@ -198,21 +199,22 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       dispatch({ type: "error", error: { source: "validation", code: "short_prompt", message: validationError, recoverable: true }, pendingMessage: trimmed });
       return;
     }
-    if (!profile.address.trim()) {
-      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true }, pendingMessage: trimmed });
+    const effectiveProfile = profileOverride ?? profile;
+    if (!effectiveProfile.address.trim()) {
+      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки: он нужен, чтобы искать товары в доступных рядом магазинах.", recoverable: true }, pendingMessage: trimmed });
       return;
     }
     dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "user", content: trimmed, createdAt: Date.now() } });
-    await runWorkflow(trimmed);
-  }, [profile.address, runWorkflow, state.intent]);
+    await runWorkflow(trimmed, effectiveProfile);
+  }, [profile, runWorkflow, state.intent]);
 
   const retry = useCallback(() => {
     if (!profile.address.trim()) {
-      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true } });
+      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки: он нужен, чтобы искать товары в доступных рядом магазинах.", recoverable: true } });
       return;
     }
-    if (state.pendingMessage) void runWorkflow(state.pendingMessage);
-  }, [profile.address, runWorkflow, state.pendingMessage]);
+    if (state.pendingMessage) void runWorkflow(state.pendingMessage, profile);
+  }, [profile, runWorkflow, state.pendingMessage]);
 
   const reconnectCatalog = useCallback(async () => {
     dispatch({ type: "catalog", mode: "connecting" });
@@ -231,8 +233,11 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
 
   const createCart = useCallback(async (): Promise<CheckoutResult | null> => {
     const variant = selectedVariant(state);
-    if (!variant) return null;
-    const isLenta = variant.retailer === "lenta" || variant.items.every((item) => item.retailer === "lenta");
+    if (!variant || variant.items.length === 0) return null;
+    const retailer = (variant.retailer ?? variant.items[0]?.retailer ?? "demo") as RetailerKey;
+    const retailerConfig = RETAILERS[retailer];
+    const isManualList = retailerConfig.capability === "manual-list";
+
     try {
       let catalog = catalogRef.current;
       const catalogKey = profileCatalogKey(profile);
@@ -245,24 +250,42 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       }
       if (catalog.mode === "demo") return null;
       dispatch({ type: "stage", stage: "creatingCart" });
-      if (isLenta) {
-        if (!catalog.validateBasketItems) throw new Error("Lenta basket validation is unavailable");
-        const validation = await catalog.validateBasketItems(variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity, priceRub: item.priceRub })));
-        if (validation.unavailableXmlIds.length > 0) throw new Error("Some Lenta basket items are unavailable");
-        const products = new Map(validation.products.map((product) => [product.xmlId, product]));
-        const items = variant.items.map((item) => {
-          const product = products.get(item.xmlId);
-          return product ? { ...item, ...product, quantity: item.quantity, role: item.role, reason: item.reason } : item;
-        });
-        dispatch({ type: "items", id: variant.id, items });
+
+      if (isManualList) {
+        let items = variant.items;
+        if (catalog.validateBasketItems) {
+          const validation = await catalog.validateBasketItems(
+            variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity, priceRub: item.priceRub })),
+          );
+          if (validation.unavailableXmlIds.length > 0) throw new Error("Some basket items are unavailable");
+          const products = new Map(validation.products.map((product) => [product.xmlId, product]));
+          items = variant.items.map((item) => {
+            const product = products.get(item.xmlId);
+            return product ? { ...item, ...product, quantity: item.quantity, role: item.role, reason: item.reason } : item;
+          });
+          dispatch({ type: "items", id: variant.id, items });
+        }
         dispatch({ type: "stage", stage: "ready" });
-        return { url: "https://lenta.com/basket/", items };
+        return { items };
       }
-      const url = await catalog.createCartLink(variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity })));
+
+      const url = await catalog.createCartLink(
+        variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity })),
+      );
       dispatch({ type: "stage", stage: "ready" });
       return { url };
     } catch {
-      dispatch({ type: "error", error: { source: "mcp", code: "cart", message: isLenta ? "Не удалось проверить товары Ленты. Обновите корзину или попробуйте позже." : "Не удалось создать ссылку. Список товаров можно скопировать и использовать вручную.", recoverable: true } });
+      dispatch({
+        type: "error",
+        error: {
+          source: "mcp",
+          code: "cart",
+          message: isManualList
+            ? `Не удалось проверить товары ${retailerConfig.label}. Обновите корзину или попробуйте позже.`
+            : "Не удалось создать корзину. Список товаров можно скопировать и использовать вручную.",
+          recoverable: true,
+        },
+      });
       return null;
     }
   }, [profile, state]);

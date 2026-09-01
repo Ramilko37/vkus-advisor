@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BasketResults, ConversationPanel, Header, ProfileControl, SelectedBasketActions } from "./components";
+import { useState } from "react";
+import { BasketResults, ConversationPanel, EmptyResultsState, ProfileControl, SelectedBasketActions } from "./components";
 import { DEFAULT_PROFILE } from "./services/profileRepository";
 import type { BasketPriority, BasketVariant, NormalizedProduct } from "./types/domain";
 
@@ -33,6 +34,61 @@ describe("ProfileControl", () => {
     expect(screen.queryByText("Бюджет")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Очистить" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Сохранить изменения" })).toBeDisabled();
+  });
+
+  it("opens with one profile title and does not force focus into the address field", () => {
+    render(
+      <ProfileControl
+        profile={DEFAULT_PROFILE}
+        authConfigured={false}
+        authStatus="guest"
+        authError={null}
+        onChange={vi.fn()}
+        onSendOtp={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+
+    expect(screen.getAllByText("Профиль")).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { name: "Профиль" })).toHaveLength(1);
+    expect(screen.getByLabelText("Адрес")).not.toHaveFocus();
+  });
+
+  it("resolves the browser geolocation into an editable address", async () => {
+    const getCurrentPosition = vi.fn((success: PositionCallback) => success({
+      coords: { latitude: 55.75, longitude: 37.61 } as GeolocationCoordinates,
+      timestamp: Date.now(),
+    } as GeolocationPosition));
+    Object.defineProperty(navigator, "geolocation", { configurable: true, value: { getCurrentPosition } });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ suggestions: ["г Москва, ул Тверская, д 1"] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ProfileControl
+        profile={DEFAULT_PROFILE}
+        authConfigured={false}
+        authStatus="guest"
+        authError={null}
+        onChange={vi.fn()}
+        onSendOtp={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+    fireEvent.click(screen.getByRole("button", { name: "Определить автоматически" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/address/geolocate",
+      expect.objectContaining({ body: JSON.stringify({ lat: 55.75, lon: 37.61 }) }),
+    ));
+    expect(await screen.findByDisplayValue("г Москва, ул Тверская, д 1")).toBeInTheDocument();
   });
 
   it("saves guest address, household and tag defaults", () => {
@@ -112,7 +168,7 @@ describe("ProfileControl", () => {
     })));
   });
 
-  it("does not save a delivery address without a resolved Lenta store", async () => {
+  it("saves a delivery address when the optional Lenta lookup has no result", async () => {
     const onChange = vi.fn();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -135,9 +191,12 @@ describe("ProfileControl", () => {
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Вавилова 19" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
 
-    expect(await screen.findByText("Не удалось подобрать магазин Ленты. Уточните адрес или повторите поиск.")).toBeInTheDocument();
-    expect(onChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Профиль" })).toBeInTheDocument();
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      address: "Москва, Вавилова 19",
+    })));
+    expect(onChange.mock.calls[0]?.[0]).not.toHaveProperty("lentaStoreId");
+    expect(screen.queryByText("Не удалось подобрать магазин Ленты. Уточните адрес или повторите поиск.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Профиль" })).not.toBeInTheDocument();
   });
 
   it("shows DaData suggestions in the profile address input", async () => {
@@ -187,15 +246,13 @@ describe("ProfileControl", () => {
   });
 });
 
-describe("Header", () => {
+describe("EmptyResultsState", () => {
   afterEach(() => cleanup());
 
-  it("frames the home screen as a grocery delivery planner", () => {
-    render(<Header route="home" />);
+  it("uses the pixel basket identity instead of a generic line icon", () => {
+    render(<EmptyResultsState onStart={vi.fn()} />);
 
-    expect(screen.getByText("AI-планировщик корзины")).toBeInTheDocument();
-    expect(screen.getByText("Доставка")).toBeInTheDocument();
-    expect(screen.getByText("Что купить сегодня?")).toBeInTheDocument();
+    expect(document.querySelector(".pixel-basket-mark--empty")).not.toBeNull();
   });
 });
 
@@ -281,7 +338,7 @@ describe("ConversationPanel", () => {
     expect(submit).toHaveBeenCalledWith("ужины на три дня");
   });
 
-  it("adds grocery category shortcuts to the request", () => {
+  it("adds task shortcuts to the request", () => {
     render(
       <ConversationPanel
         hasDeliveryAddress
@@ -311,16 +368,17 @@ describe("ConversationPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Овощи" }));
+    fireEvent.click(screen.getByRole("button", { name: "Без готовки" }));
 
-    expect(screen.getByLabelText("Что собрать?")).toHaveValue("овощи и зелень");
+    expect(screen.getByLabelText("Что собрать?")).toHaveValue("почти без готовки");
   });
 });
 
 describe("BasketResults", () => {
   afterEach(() => cleanup());
 
-  it("provides a header link back to the home screen", () => {
+  it("provides a new-request action back to the home screen", () => {
+    const onStartNewSearch = vi.fn();
     render(
       <BasketResults
         planner={{
@@ -331,10 +389,12 @@ describe("BasketResults", () => {
           },
           submit: vi.fn(), retry: vi.fn(), reconnectCatalog: vi.fn(), mockResults: vi.fn(), createCart: vi.fn(), cancel: vi.fn(), replaceItem: vi.fn(), selectVariant: vi.fn(), clearVariantSelection: vi.fn(), updateItems: vi.fn(),
         } as never}
+        onStartNewSearch={onStartNewSearch}
       />,
     );
 
-    expect(screen.getByRole("link", { name: "На главную" })).toHaveAttribute("href", "/");
+    fireEvent.click(screen.getByRole("button", { name: "Новый запрос" }));
+    expect(onStartNewSearch).toHaveBeenCalledOnce();
   });
 
   it("shows and dismisses the first-results hint", () => {
@@ -438,7 +498,7 @@ describe("BasketResults", () => {
     expect(screen.queryByText("Творог ВкусВилл")).not.toBeInTheDocument();
   });
 
-  it("keeps all retailer tabs visible when one provider has no baskets", () => {
+  it("hides retailers that have no basket options", () => {
     render(
       <BasketResults
         planner={{
@@ -474,13 +534,12 @@ describe("BasketResults", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: /Пятёрочка/ }));
-
-    expect(screen.getByRole("tab", { name: /Пятёрочка/ })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Пока нет корзин для Пятёрочка")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /ВкусВилл/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Лента/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Пятёрочка/ })).not.toBeInTheDocument();
   });
 
-  it("shows retailer diagnostics for an empty retailer tab", () => {
+  it("does not expose a failed retailer as a selectable tab", () => {
     render(
       <BasketResults
         planner={{
@@ -518,10 +577,9 @@ describe("BasketResults", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: /Лента/ }));
-
-    expect(screen.getByText("Не удалось собрать три валидные корзины.")).toBeInTheDocument();
-    expect(screen.getByText("Кандидатов: 16")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Лента/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Не удалось собрать три валидные корзины.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Кандидатов: 16")).not.toBeInTheDocument();
   });
 });
 
@@ -531,7 +589,26 @@ describe("SelectedBasketActions", () => {
     vi.restoreAllMocks();
   });
 
-  it("copies the refreshed Lenta list and offers the official Lenta basket after validation", async () => {
+  it("shows automatic cart capability for VkusVill", () => {
+    const variant = makeVariant("vkusvill", "balanced", "Творог ВкусВилл");
+
+    render(
+      <SelectedBasketActions
+        variant={variant}
+        variants={[variant]}
+        mode="live"
+        creating={false}
+        onItems={vi.fn()}
+        onReplace={vi.fn()}
+        onCreateCart={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("ВкусВилл · Автокорзина")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Открыть корзину во ВкусВилле" })).toBeInTheDocument();
+  });
+
+  it("copies a refreshed Lenta list without pretending to create an automatic cart", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     const variant = makeVariant("lenta", "balanced", "Молоко Лента");
@@ -547,18 +624,63 @@ describe("SelectedBasketActions", () => {
         creating={false}
         onItems={vi.fn()}
         onReplace={vi.fn()}
-        onCreateCart={vi.fn().mockResolvedValue({ url: "https://lenta.com/basket/", items: [refreshedItem] })}
+        onCreateCart={vi.fn().mockResolvedValue({ items: [refreshedItem] })}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Проверить список Ленты" }));
+    expect(screen.getByText("Лента · Список")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и скопировать список Ленты" }));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("2 × Молоко Лента — 250 ₽"));
     expect(screen.getByRole("status")).toHaveTextContent("Список проверен и скопирован");
-    expect(screen.getByRole("link", { name: "Открыть Ленту" })).toHaveAttribute("href", "https://lenta.com/basket/");
-    expect(screen.queryByText("Открыть во ВкусВилл")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Открыть Ленту/ })).not.toBeInTheDocument();
+  });
+
+  it("shows an empty state, restores the last item, and disables checkout", () => {
+    const variant = makeVariant("vkusvill", "balanced", "Творог ВкусВилл");
+    const onBackToVariants = vi.fn();
+    const onCreateCart = vi.fn();
+
+    render(<SelectedBasketHarness initial={variant} onBackToVariants={onBackToVariants} onCreateCart={onCreateCart} />);
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+
+    expect(screen.getByRole("heading", { name: "В корзине больше нет товаров" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Вернуть последний товар" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Открыть корзину во ВкусВилле" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "К вариантам" }));
+    expect(onBackToVariants).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Вернуть последний товар" }));
+    expect(screen.getByText("Творог ВкусВилл")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Открыть корзину во ВкусВилле" })).toBeEnabled();
   });
 });
+
+function SelectedBasketHarness({ initial, onBackToVariants, onCreateCart }: { initial: BasketVariant; onBackToVariants: () => void; onCreateCart: () => Promise<never> | never }) {
+  const [variant, setVariant] = useState(initial);
+  const updateItems = (items: BasketVariant["items"]) => {
+    setVariant((current) => ({
+      ...current,
+      items,
+      uniqueItemsCount: items.length,
+      totalRub: items.reduce((sum, item) => sum + item.priceRub * item.quantity, 0),
+    }));
+  };
+
+  return (
+    <SelectedBasketActions
+      variant={variant}
+      variants={[variant]}
+      mode="live"
+      creating={false}
+      onItems={updateItems}
+      onReplace={vi.fn()}
+      onCreateCart={onCreateCart as never}
+      onBackToVariants={onBackToVariants}
+    />
+  );
+}
 
 function makeVariant(retailer: NonNullable<NormalizedProduct["retailer"]>, strategy: BasketPriority, productName: string): BasketVariant {
   return {
