@@ -73,15 +73,13 @@ jobs:
               number = int(match.group(1))
               value = match.group(2).strip()
               candidates.setdefault(number, []).append(value)
-              print(
-                  f"candidate chunk {number:02d}: length={len(value)} "
-                  f"sha256={hashlib.sha256(value.encode()).hexdigest()}"
-              )
 
           chunks: dict[int, str] = {}
           for number, expected_hash in expected_hashes.items():
-              for value in candidates.get(number, []):
-                  if len(value) != expected_lengths[number]:
+              expected_length = expected_lengths[number]
+              for candidate in candidates.get(number, []):
+                  value = candidate[:expected_length]
+                  if len(value) != expected_length:
                       continue
                   if hashlib.sha256(value.encode()).hexdigest() == expected_hash:
                       chunks[number] = value
@@ -92,15 +90,12 @@ jobs:
           encoded = "".join(chunks[number] for number in range(9))
           if hashlib.sha256(encoded.encode()).hexdigest() != expected_encoded_hash:
               raise SystemExit("Combined patch payload hash mismatch")
-
           compressed = base64.b64decode(encoded, validate=True)
           if hashlib.sha256(compressed).hexdigest() != expected_xz_hash:
               raise SystemExit("Compressed patch hash mismatch")
-
           patch = lzma.decompress(compressed)
           if hashlib.sha256(patch).hexdigest() != expected_patch_hash:
               raise SystemExit("Decompressed patch hash mismatch")
-
           with open("/tmp/focused-ai-utility.patch", "wb") as output:
               output.write(patch)
           print(f"Reassembled and verified {len(patch)} patch bytes")
