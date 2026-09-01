@@ -6,49 +6,71 @@ import { useOnboarding } from "./useOnboarding";
 describe("useOnboarding", () => {
   afterEach(() => window.localStorage.clear());
 
-  it("moves through steps, goes back, and persists the request draft", () => {
+  it("finishes the optional intro without opening delivery", () => {
     const { result } = renderHook(() => useOnboarding({ ready: true }));
 
-    act(() => result.current.start());
-    expect(result.current.state.step).toBe("delivery");
+    act(() => result.current.finishIntro());
 
-    act(() => result.current.goTo("profile"));
-    act(() => result.current.setRequestDraft("ужины на три дня"));
-    act(() => result.current.back());
-
-    expect(result.current.state.step).toBe("delivery");
-    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) || "{}")).toEqual(expect.objectContaining({
-      step: "delivery",
-      requestDraft: "ужины на три дня",
+    expect(result.current.visible).toBe(false);
+    expect(result.current.state).toEqual(expect.objectContaining({
+      version: 2,
+      status: "completed",
+      step: "value",
     }));
   });
 
-  it("dismisses onboarding and can reopen the required delivery step", () => {
+  it("opens deferred delivery and preserves the request draft", () => {
     const { result } = renderHook(() => useOnboarding({ ready: true }));
 
-    act(() => result.current.dismiss());
-    expect(result.current.state.status).toBe("dismissed");
+    act(() => result.current.finishIntro());
+    act(() => result.current.openDelivery("ужины до 3000 ₽"));
 
-    act(() => result.current.open("delivery", "ужины до 3000 ₽"));
+    expect(result.current.visible).toBe(true);
     expect(result.current.state).toEqual(expect.objectContaining({
       status: "in_progress",
       step: "delivery",
       requestDraft: "ужины до 3000 ₽",
     }));
+    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) || "{}")).toEqual(expect.objectContaining({
+      requestDraft: "ужины до 3000 ₽",
+    }));
   });
 
-  it("completes after profile setup and dismisses each contextual hint once", () => {
+  it("keeps the current Home draft when delivery is opened from the topbar", () => {
     const { result } = renderHook(() => useOnboarding({ ready: true }));
 
-    act(() => result.current.complete());
-    expect(result.current.state.status).toBe("completed");
-    expect(result.current.state.step).toBe("profile");
-    expect(result.current.state.completedAt).toEqual(expect.any(String));
-    expect(result.current.showResultsHint).toBe(true);
+    act(() => result.current.finishIntro());
+    act(() => result.current.setRequestDraft("ужины для двоих без грибов"));
+    act(() => result.current.openDelivery());
 
-    act(() => result.current.dismissResultsHint());
-    act(() => result.current.dismissBasketEditHint());
-    expect(result.current.showResultsHint).toBe(false);
-    expect(result.current.showBasketEditHint).toBe(false);
+    expect(result.current.state).toEqual(expect.objectContaining({
+      status: "in_progress",
+      step: "delivery",
+      requestDraft: "ужины для двоих без грибов",
+    }));
+  });
+
+  it("completes delivery and clears the submitted request", () => {
+    const { result } = renderHook(() => useOnboarding({ ready: true }));
+
+    act(() => result.current.openDelivery("ужины на три дня"));
+    act(() => result.current.completeDelivery());
+
+    expect(result.current.visible).toBe(false);
+    expect(result.current.state).toEqual(expect.objectContaining({
+      status: "completed",
+      step: "value",
+      requestDraft: "",
+    }));
+  });
+
+  it("replays only the value explanation", () => {
+    const { result } = renderHook(() => useOnboarding({ ready: true }));
+
+    act(() => result.current.finishIntro());
+    act(() => result.current.replay());
+
+    expect(result.current.visible).toBe(true);
+    expect(result.current.state.step).toBe("value");
   });
 });

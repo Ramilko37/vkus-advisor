@@ -33,10 +33,10 @@ export interface UserProfile {
 }
 
 export type OnboardingStatus = "not_started" | "in_progress" | "completed" | "dismissed";
-export type OnboardingStep = "value" | "delivery" | "profile";
+export type OnboardingStep = "value" | "delivery";
 
 export interface OnboardingState {
-  version: 1;
+  version: 2;
   status: OnboardingStatus;
   step: OnboardingStep;
   requestDraft: string;
@@ -218,6 +218,6 @@ export interface BasketValidationResult {
 }
 
 export interface CheckoutResult {
-  url: string;
+  url?: string;
   items?: BasketItem[];
 }

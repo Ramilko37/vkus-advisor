@@ -1,10 +1,10 @@
-import { Check, ChevronLeft, Loader2, MapPin, Minus, Plus, ShoppingBasket, X } from "lucide-react";
+import { Check, ChevronLeft, Loader2, MapPin, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { PixelBasketMark } from "../brand/PixelBasketMark";
 import type { useOnboarding } from "../../hooks/useOnboarding";
 import { findLentaStores, reverseGeocodeAddress, suggestAddresses } from "../../services/catalog";
-import { trackProductEvent } from "../../services/productAnalytics";
 import { normalizeProfile } from "../../services/profileRepository";
-import type { LentaStore, OnboardingStep, UserProfile } from "../../types/domain";
+import type { LentaStore, UserProfile } from "../../types/domain";
 import "./onboarding-flow.css";
 
 type OnboardingController = ReturnType<typeof useOnboarding>;
@@ -13,9 +13,9 @@ interface OnboardingFlowProps {
   onboarding: OnboardingController;
   profile: UserProfile;
   onProfileChange: (profile: UserProfile) => void | Promise<void>;
+  onDeliveryComplete: (profile: UserProfile, requestDraft: string) => void | Promise<void>;
 }
 
-const steps: OnboardingStep[] = ["value", "delivery", "profile"];
 const geoStatusCopy = {
   ready: "Адрес определён.",
   empty: "Не удалось найти адрес в этой точке — введите его вручную.",
@@ -24,22 +24,12 @@ const geoStatusCopy = {
   error: "Не удалось определить адрес — попробуйте ещё раз или введите его вручную.",
 };
 
-export function OnboardingFlow({ onboarding, profile, onProfileChange }: OnboardingFlowProps) {
+export function OnboardingFlow({ onboarding, profile, onProfileChange, onDeliveryComplete }: OnboardingFlowProps) {
   const [draft, setDraft] = useState(() => normalizeProfile(profile));
-  const shown = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const onboardingRef = useRef(onboarding);
   onboardingRef.current = onboarding;
-  const stepIndex = steps.indexOf(onboarding.state.step);
-
-  useEffect(() => {
-    if (shown.current) return;
-    shown.current = true;
-    trackProductEvent(onboarding.state.status === "in_progress" ? "onboarding_resumed" : "onboarding_shown", {
-      step: onboarding.state.step,
-    });
-  }, [onboarding.state.status, onboarding.state.step]);
 
   useEffect(() => {
     dialogRef.current?.scrollTo?.({ top: 0 });
@@ -52,7 +42,6 @@ export function OnboardingFlow({ onboarding, profile, onProfileChange }: Onboard
     document.body.style.overflow = "hidden";
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
-        trackProductEvent("onboarding_dismissed", { step: onboardingRef.current.state.step });
         onboardingRef.current.dismiss();
         return;
       }
@@ -77,69 +66,32 @@ export function OnboardingFlow({ onboarding, profile, onProfileChange }: Onboard
     };
   }, []);
 
-  const saveDraft = async (next = draft) => {
-    const normalized = normalizeProfile(next);
-    setDraft(normalized);
-    await onProfileChange(normalized);
-  };
-
   return (
     <div ref={dialogRef} className="onboarding" role="dialog" aria-modal="true" aria-label="Первоначальная настройка">
       <div className="onboarding__frame">
         <header className="onboarding__header">
-          {stepIndex > 0 ? (
-            <button className="onboarding__icon-button" type="button" onClick={() => onboarding.back()} aria-label="Назад">
+          {onboarding.state.step === "delivery" ? (
+            <button className="onboarding__icon-button" type="button" onClick={onboarding.dismiss} aria-label="Назад">
               <ChevronLeft aria-hidden="true" />
             </button>
           ) : <span className="onboarding__header-spacer" />}
-          <div className="onboarding__progress" aria-label={`Шаг ${stepIndex + 1} из ${steps.length}`} aria-live="polite">
-            <span>Шаг {stepIndex + 1} из {steps.length}</span>
-            <div aria-hidden="true">{steps.map((step, index) => <i key={step} className={index <= stepIndex ? "is-active" : ""} />)}</div>
-          </div>
-          <button className="onboarding__icon-button" type="button" onClick={() => {
-            trackProductEvent("onboarding_dismissed", { step: onboarding.state.step });
-            onboarding.dismiss();
-          }} aria-label="Пропустить настройку">
+          <span className="onboarding__brand">Умная корзина</span>
+          <button className="onboarding__icon-button" type="button" onClick={onboarding.dismiss} aria-label="Закрыть">
             <X aria-hidden="true" />
           </button>
         </header>
 
-        {onboarding.state.step === "value" && <ValueStep onStart={() => {
-          trackProductEvent("onboarding_started");
-          trackProductEvent("onboarding_value_completed");
-          onboarding.start();
-        }} />}
-        {onboarding.state.step === "delivery" && (
+        {onboarding.state.step === "value" ? (
+          <ValueStep onContinue={onboarding.finishIntro} />
+        ) : (
           <DeliveryStep
             profile={draft}
+            requestDraft={onboarding.state.requestDraft}
             onChange={setDraft}
-            onContinue={() => {
-              void saveDraft();
-              trackProductEvent("onboarding_address_entered", { has_lenta_store: Boolean(draft.lentaStoreId) });
-              onboarding.goTo("profile");
-            }}
-          />
-        )}
-        {onboarding.state.step === "profile" && (
-          <ProfileStep
-            profile={draft}
-            onChange={setDraft}
-            onContinue={async () => {
-              await saveDraft();
-              trackProductEvent("onboarding_profile_completed", {
-                household_size: draft.householdSize,
-                restrictions_count: draft.excludedIngredients.length,
-                preferences_count: draft.preferences.length,
-              });
-              onboarding.complete();
-              trackProductEvent("onboarding_completed");
-            }}
-            onSkip={async () => {
-              const next = normalizeProfile({ ...draft, householdSize: 1, excludedIngredients: [], preferences: [] });
-              await saveDraft(next);
-              trackProductEvent("onboarding_profile_skipped");
-              onboarding.complete();
-              trackProductEvent("onboarding_completed");
+            onContinue={async (nextProfile) => {
+              await onProfileChange(nextProfile);
+              onboarding.completeDelivery();
+              await onDeliveryComplete(nextProfile, onboarding.state.requestDraft);
             }}
           />
         )}
@@ -148,26 +100,33 @@ export function OnboardingFlow({ onboarding, profile, onProfileChange }: Onboard
   );
 }
 
-function ValueStep({ onStart }: { onStart: () => void }) {
+function ValueStep({ onContinue }: { onContinue: () => void }) {
   return (
     <section className="onboarding__content onboarding__value">
-      <div className="onboarding__hero-mark" aria-hidden="true"><ShoppingBasket /></div>
+      <div className="onboarding__pixel-hero" aria-hidden="true">
+        <PixelBasketMark size={112} />
+      </div>
       <h1 id="onboarding-title" tabIndex={-1}>Соберём покупки вместо вас</h1>
-      <p className="onboarding__lead">Опишите, что вам нужно, обычным языком. Мы найдём реальные товары и цены и соберём несколько готовых вариантов корзины.</p>
-      <ol className="onboarding__benefits">
-        <li><b>1</b><span><strong>Укажите, где покупаете</strong><small>Адрес нужен, чтобы искать реальные товары и актуальный ассортимент.</small></span></li>
-        <li><b>2</b><span><strong>Расскажите, что нужно</strong><small>Например: ужины на 3 дня для двоих до 3000 ₽, без грибов.</small></span></li>
-        <li><b>3</b><span><strong>Выберите корзину</strong><small>Сравните варианты, измените состав и переходите к покупке.</small></span></li>
-      </ol>
+      <p className="onboarding__lead">Опишите задачу обычным языком. Мы найдём реальные товары и предложим три корзины по цене и удобству.</p>
       <div className="onboarding__footer">
-        <p>Без регистрации. Настройки можно изменить позже.</p>
-        <button className="onboarding__primary" type="button" onClick={onStart}>Начать</button>
+        <p>Без регистрации. Адрес спросим только перед поиском товаров.</p>
+        <button className="onboarding__primary" type="button" onClick={onContinue}>Попробовать</button>
       </div>
     </section>
   );
 }
 
-function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile; onChange: (profile: UserProfile) => void; onContinue: () => void }) {
+function DeliveryStep({
+  profile,
+  requestDraft,
+  onChange,
+  onContinue,
+}: {
+  profile: UserProfile;
+  requestDraft: string;
+  onChange: (profile: UserProfile) => void;
+  onContinue: (profile: UserProfile) => void | Promise<void>;
+}) {
   const [stores, setStores] = useState<LentaStore[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "empty" | "error">("idle");
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -177,6 +136,7 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
   const [geoStatus, setGeoStatus] = useState<"idle" | "loading" | "ready" | "empty" | "denied" | "unsupported" | "error">("idle");
   const [retry, setRetry] = useState(0);
   const [addressTouched, setAddressTouched] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const address = profile.address.trim();
   const validAddress = address.length >= 8 && /\d/.test(address);
   const profileRef = useRef(profile);
@@ -227,15 +187,12 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
     const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
       setStatus("loading");
-      trackProductEvent("onboarding_store_search_started");
       try {
         const nextStores = await findLentaStores(address, controller.signal);
+        if (controller.signal.aborted) return;
         setStores(nextStores);
         setStatus(nextStores.length ? "ready" : "empty");
-        if (nextStores.length) {
-          onChangeRef.current(withStore(profileRef.current, nextStores[0]));
-          trackProductEvent("onboarding_store_selected", { retailer: "lenta", automatic: true });
-        }
+        if (nextStores.length) onChangeRef.current(withStore(profileRef.current, nextStores[0]));
       } catch {
         if (controller.signal.aborted) return;
         setStatus("error");
@@ -303,10 +260,26 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
     );
   };
 
+  const complete = async () => {
+    const next = normalizeProfile(profile);
+    setSubmitting(true);
+    try {
+      await onContinue(next);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <section className="onboarding__content">
-      <h1 id="onboarding-title" tabIndex={-1}>Где вы покупаете продукты?</h1>
-      <p className="onboarding__lead">Адрес нужен, чтобы показывать реальные товары, цены и ассортимент рядом с вами.</p>
+    <section className="onboarding__content onboarding__delivery">
+      <h1 id="onboarding-title" tabIndex={-1}>Куда доставить продукты?</h1>
+      <p className="onboarding__lead">
+        {requestDraft
+          ? "По адресу найдём доступные товары и цены. Ваш запрос уже сохранён."
+          : "По адресу найдём доступные товары, цены и магазины рядом."}
+      </p>
+      {requestDraft && <p className="onboarding__request-preview">{requestDraft}</p>}
+
       <div className="onboarding__field onboarding__address-field">
         <label htmlFor="onboarding-address">Адрес</label>
         <div className="onboarding__address-control">
@@ -362,21 +335,18 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
       {addressTouched && !validAddress && <p id="onboarding-address-error" className="onboarding__field-error">Укажите улицу и номер дома.</p>}
 
       <div className="onboarding__store-status" aria-live="polite">
-        {status === "loading" && <p>Ищем ближайшие магазины…</p>}
-        {status === "empty" && <div className="onboarding__inline-state"><strong>Не нашли подходящий магазин для этого адреса</strong><span>Проверьте адрес или попробуйте другой.</span><button type="button" onClick={() => addressRef.current?.focus()}>Изменить адрес</button></div>}
-        {status === "error" && <div className="onboarding__inline-state"><strong>Не удалось проверить магазины</strong><span>Повторите попытку.</span><div><button type="button" onClick={() => setRetry((value) => value + 1)}>Попробовать ещё раз</button><button type="button" onClick={() => addressRef.current?.focus()}>Изменить адрес</button></div></div>}
+        {status === "loading" && <p>Проверяем ближайшую Ленту…</p>}
+        {status === "empty" && <div className="onboarding__inline-state"><strong>Не нашли ближайшую Ленту</strong><span>Адрес всё равно сохраним и проверим другие доступные магазины.</span><button type="button" onClick={() => addressRef.current?.focus()}>Изменить адрес</button></div>}
+        {status === "error" && <div className="onboarding__inline-state"><strong>Не удалось проверить Ленту</strong><span>Можно продолжить: остальные магазины проверим при подборе корзины.</span><div><button type="button" onClick={() => setRetry((value) => value + 1)}>Попробовать ещё раз</button><button type="button" onClick={() => addressRef.current?.focus()}>Изменить адрес</button></div></div>}
         {status === "ready" && stores.length === 1 && (
           <div className="onboarding__selected-store"><Check aria-hidden="true" /><span><strong>{storeLabel(stores[0])}</strong>{stores[0].distanceMeters ? <small>{formatDistance(stores[0].distanceMeters)} от указанного адреса</small> : null}</span><button type="button" onClick={() => addressRef.current?.focus()}>Изменить</button></div>
         )}
         {status === "ready" && stores.length > 1 && (
           <fieldset className="onboarding__store-list">
-            <legend>Ближайший магазин выбран автоматически</legend>
+            <legend>Ближайшая Лента выбрана автоматически</legend>
             {stores.map((store) => (
               <label key={store.id}>
-                <input type="radio" name="lenta-store" checked={profile.lentaStoreId === store.id} onChange={() => {
-                  onChange(withStore(profile, store));
-                  trackProductEvent("onboarding_store_selected", { retailer: "lenta", automatic: false });
-                }} />
+                <input type="radio" name="lenta-store" checked={profile.lentaStoreId === store.id} onChange={() => onChange(withStore(profile, store))} />
                 <span>{storeLabel(store)}{store.distanceMeters ? <small>{formatDistance(store.distanceMeters)}</small> : null}</span>
               </label>
             ))}
@@ -385,76 +355,17 @@ function DeliveryStep({ profile, onChange, onContinue }: { profile: UserProfile;
       </div>
 
       <div className="onboarding__footer">
-        <p>Подберём ближайшую Ленту по адресу. При необходимости магазин можно изменить.</p>
+        <p>Адрес используем для всех магазинов. Ленту выберем автоматически, если она доступна рядом.</p>
         <button
           className="onboarding__primary"
           type="button"
-          disabled={!validAddress || status !== "ready" || !profile.lentaStoreId}
-          onClick={onContinue}
+          disabled={!validAddress || submitting}
+          onClick={() => void complete()}
         >
-          Продолжить
+          {submitting ? "Продолжаем…" : "Продолжить"}
         </button>
       </div>
     </section>
-  );
-}
-
-function ProfileStep({ profile, onChange, onContinue, onSkip }: { profile: UserProfile; onChange: (profile: UserProfile) => void; onContinue: () => void; onSkip: () => void }) {
-  return (
-    <section className="onboarding__content">
-      <h1 id="onboarding-title" tabIndex={-1}>Что учитывать в ваших корзинах?</h1>
-      <p className="onboarding__lead">Эти настройки запомним и будем автоматически учитывать в следующих подборках.</p>
-
-      <div className="onboarding__profile-block">
-        <div className="onboarding__section-title"><span>Для скольких человек обычно покупаете?</span><strong>{peopleLabel(profile.householdSize)}</strong></div>
-        <div className="onboarding__stepper">
-          <button type="button" aria-label="Уменьшить количество людей" disabled={profile.householdSize <= 1} onClick={() => onChange({ ...profile, householdSize: profile.householdSize - 1 })}><Minus /></button>
-          <output>{peopleLabel(profile.householdSize)}</output>
-          <button type="button" aria-label="Увеличить количество людей" disabled={profile.householdSize >= 12} onClick={() => onChange({ ...profile, householdSize: profile.householdSize + 1 })}><Plus /></button>
-        </div>
-      </div>
-
-      <TagEditor label="Что точно не покупать?" hint="Аллергии, продукты, которые не едите, или другие постоянные ограничения." placeholder="Например: грибы" values={profile.excludedIngredients} onChange={(values) => onChange({ ...profile, excludedIngredients: values })} />
-      <TagEditor label="Что предпочитаете?" hint="Пожелания, которые стоит учитывать, если есть выбор." placeholder="Например: больше белка" values={profile.preferences} onChange={(values) => onChange({ ...profile, preferences: values })} />
-
-      <aside className="onboarding__profile-explainer">
-        <strong>Здесь только постоянные настройки.</strong>
-        <span>Бюджет, количество дней, конкретные блюда и время на готовку можно менять в каждом новом запросе.</span>
-      </aside>
-
-      <div className="onboarding__footer onboarding__footer--split">
-        <button className="onboarding__secondary" type="button" onClick={onSkip}>Пропустить</button>
-        <button className="onboarding__primary" type="button" onClick={onContinue}>Сохранить</button>
-      </div>
-    </section>
-  );
-}
-
-function TagEditor({ label, hint, placeholder, values, onChange }: { label: string; hint: string; placeholder: string; values: string[]; onChange: (values: string[]) => void }) {
-  const [value, setValue] = useState("");
-  const add = () => {
-    const next = value.trim();
-    if (!next || values.some((item) => item.toLocaleLowerCase("ru-RU") === next.toLocaleLowerCase("ru-RU"))) return;
-    onChange([...values, next]);
-    setValue("");
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    add();
-  };
-  return (
-    <div className="onboarding__profile-block">
-      <label className="onboarding__field">
-        <span>{label}</span>
-        <small>{hint}</small>
-        <div className="onboarding__tag-input">
-          <input aria-label={label} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={onKeyDown} placeholder={placeholder} />
-          <button type="button" onClick={add} disabled={!value.trim()}>Добавить</button>
-        </div>
-      </label>
-      {values.length > 0 && <div className="onboarding__tags">{values.map((item) => <button key={item} type="button" onClick={() => onChange(values.filter((value) => value !== item))}>{item}<X aria-label="Удалить" /></button>)}</div>}
-    </div>
   );
 }
 
@@ -473,11 +384,4 @@ function storeLabel(store: LentaStore) {
 
 function formatDistance(value: number) {
   return value < 1000 ? `${Math.round(value)} м` : `${(value / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} км`;
-}
-
-function peopleLabel(value: number) {
-  const mod10 = value % 10;
-  const mod100 = value % 100;
-  const noun = mod10 === 1 && mod100 !== 11 ? "человек" : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? "человека" : "человек";
-  return `${value} ${noun}`;
 }

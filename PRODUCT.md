@@ -2,58 +2,79 @@
 
 <!-- impeccable:product-schema 1 -->
 
-## Platform
+## Название
 
-web
+**Умная корзина**
 
-## Users
+## Платформа
 
-Primary users are VkusVill shoppers who want to assemble a grocery basket quickly from a practical request rather than searching for individual products. They describe meals, budget, household size, preferences, and restrictions, then compare basket scenarios before choosing one.
+Мобильное web-приложение.
 
-## Product Purpose
+## Пользователи
 
-VkusVill Advisor helps users assemble optimal grocery baskets for their stated need. Success means the user can describe a food-shopping task in natural language, receive three useful basket scenarios, understand the tradeoffs, choose a variant, and create or copy a basket for checkout.
+Основные пользователи - люди, которые заказывают продукты онлайн и хотят решать задачу целиком, а не искать каждый товар вручную. Пользователь описывает меню, бюджет, количество человек, предпочтения и ограничения обычным языком, затем сравнивает готовые корзины.
 
-## Positioning
+## Назначение
 
-The product is positioned as a service for building optimal grocery baskets around the user's request. It is not a generic product search: its mechanism is "describe the task -> get three basket scenarios with tradeoffs -> choose a basket -> create a cart link."
+«Умная корзина» превращает бытовой запрос в сравнимые продуктовые корзины из реальных каталогов магазинов. Успешный сценарий выглядит так:
 
-## Operating Context
+`задача -> адрес при необходимости -> магазины -> три стратегии -> уточнение -> редактирование -> покупка или проверенный список`
 
-The product runs as an experimental web app backed by a local or hosted Node API. LLM calls go through NeuralDeep by default; OpenRouter remains as a legacy provider but is not the default path. Product discovery and cart operations use the VkusVill MCP/catalog flow through the server, not directly from the browser.
+## Позиционирование
 
-## Capabilities and Constraints
+Это независимый агрегатор корзин и focused AI utility, а не каталог товаров и не приложение одного ритейлера.
 
-- The user can submit a natural-language basket request.
-- The app extracts intent such as people, days, meals, budget, cooking time, preferences, and excluded ingredients.
-- The app searches the VkusVill catalog and composes three basket scenarios: balanced, budget, and speed.
-- The app shows tradeoffs, item quantities, prices, and selected-basket controls.
-- The app can create a cart link when the live catalog path is available.
-- API keys and LLM/MCP credentials must stay server-side and must not be exposed in the browser bundle.
-- Prices, availability, images, and product composition must come from catalog data where available.
-- The product must not invent unavailable products as if they were real catalog items.
+ВкусВилл, Лента и Пятёрочка выступают равноправными источниками товаров. Интерфейс не должен создавать впечатление официального приложения или партнёрства без отдельного подтверждения.
 
-## Brand Commitments
+## Основные возможности
 
-The product name is VkusVill Advisor. The app is an unofficial experimental prototype and should not claim official status unless that changes. The interface copy is Russian-first and should stay practical, concise, and task-oriented.
+- Принимать запрос на корзину на естественном языке.
+- Выделять количество людей, дни, приёмы пищи, бюджет, время на готовку, предпочтения и исключения.
+- Запрашивать адрес только после реального запроса пользователя или по явному действию в topbar.
+- Искать реальные товары и цены в доступных каталогах.
+- Показывать доступные магазины и способ переноса корзины: автокорзина или проверенный список.
+- Формировать три стратегии внутри магазина: сбалансированную, экономную и быструю.
+- Объяснять разницу по цене и готовке обычным языком.
+- Поддерживать follow-up запросы без потери последнего валидного результата.
+- Позволять менять количество, заменять и удалять товары.
+- Создавать ссылку на корзину там, где это поддерживает ритейлер, или копировать проверенный список для ручного добавления.
 
-## Evidence on Hand
+## Ограничения
 
-- Existing React/Vite application: `src/App.tsx`, `src/components.tsx`, `src/styles.css`.
-- Server integration and provider routing: `server.mjs`.
-- Catalog and MCP parsing: `src/services/catalog.ts`, `src/services/mcpParsing.ts`, `src/services/retrieveCandidateProducts.ts`.
-- Prompt and schema contracts: `src/prompts/intentPrompt.ts`, `src/prompts/basketPrompt.ts`, `src/schemas.ts`.
-- Design-system source imported into the project: `design-system/` and `src/styles/vkusvill-advisor.css`.
-- No confirmed testimonials, performance claims, commercial pricing, legal status, or official VkusVill endorsement are on hand.
+- Цены, наличие, изображения и состав должны приходить из каталога, если данные доступны.
+- Продукт не должен выдавать придуманный товар за реальную позицию магазина.
+- Возможности checkout различаются между ритейлерами и должны быть объяснены до последнего шага.
+- API-ключи, MCP и LLM credentials остаются только на сервере.
+- Аналитический backend и новый event collector не входят в текущий milestone.
 
-## Product Principles
+## Профиль
 
-- Start from the user's task, not from a product list.
-- Make tradeoffs explicit so choosing a basket feels informed, not random.
-- Prefer real catalog data over polished fiction.
-- Keep credentials and provider complexity under the hood.
-- Preserve a fast, mobile-first flow that works for repeated grocery decisions.
+Профиль хранит только устойчивые defaults:
 
-## Accessibility & Inclusion
+- адрес доставки;
+- размер домохозяйства;
+- постоянные ограничения;
+- постоянные предпочтения.
 
-No product-specific accessibility standard has been confirmed yet. Future work should preserve baseline web accessibility for keyboard access, readable text, clear focus states, and Russian-language copy that remains understandable on small screens.
+Бюджет, количество дней, конкретные блюда и приоритет текущей покупки остаются частью BasketIntent. Явный запрос пользователя всегда сильнее profile defaults.
+
+## Бренд
+
+Visible brand - «Умная корзина». Pixel art является постоянной частью идентичности: app icon, onboarding, loader, empty states, success states и social preview. Lucide используется для системных controls.
+
+## Принципы
+
+- Начинать с задачи пользователя, а не с каталога.
+- Давать первый meaningful action до запроса адреса и профиля.
+- Делать trade-offs явными и проверяемыми.
+- Ставить реальные данные выше визуально убедительной фикции.
+- Сохранять последний валидный результат при recoverable error.
+- Поддерживать mobile-first flow без горизонтального overflow на 320 px.
+
+## Accessibility
+
+- Touch target не меньше 44 px.
+- Видимый focus state.
+- Клавиатурная работа address autocomplete, dialogs, retailer selector и follow-up.
+- `prefers-reduced-motion` для анимаций.
+- Практичный и понятный русский текст.

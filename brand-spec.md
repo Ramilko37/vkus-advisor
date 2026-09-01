@@ -1,30 +1,49 @@
-# Vkusvill Advisor Brand Spec
+# «Умная корзина» Brand Spec
 
-System: a mobile-first grocery assistant with a fresh utility feel: bright surfaces, soft green action, glass input layers, and bento product cards inspired by the attached screenshots without copying their layout.
+Нейтральный независимый агрегатор продуктовых корзин. ВкусВилл, Лента и Пятёрочка выступают источниками товаров и не являются брендом приложения.
+
+## Идея
+
+**Три понятных варианта. Одна готовая корзина.**
+
+Продукт говорит о результате, а не об AI-технологии. Характер: практичный, спокойный, умный, продуктовый, без визуальных AI-клише.
 
 ## Tokens
 
 ```css
 :root {
-  --bg: oklch(0.975 0.004 121.6);
-  --surface: oklch(1.000 0.000 89.9);
-  --fg: oklch(0.209 0.000 89.9);
-  --muted: oklch(0.577 0.014 149.1);
-  --border: oklch(0.931 0.000 89.9);
-  --accent: oklch(0.611 0.132 145.7);
+  --background: #eef2ea;
+  --surface: #ffffff;
+  --surface-soft: #f6f8f3;
+  --text-primary: #101511;
+  --text-secondary: #4f5b52;
+  --text-muted: #748075;
+  --accent: #09911f;
+  --accent-hover: #057519;
+  --accent-soft: #e7f8e7;
+  --accent-deep: #0d3424;
+  --deal: #85d90f;
 }
 ```
 
 ## Type
 
-- Display: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif.
-- Body: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif.
-- Mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace.
+- UI and headings: `Noto Sans`, system-ui, sans-serif.
+- Один кириллический sans stack вместо декоративного display font.
+- Характер создаётся плотной иерархией, крупными числами и ясной композицией.
 
-## Posture Rules
+## Identity layers
 
-- Start from the task composer, not a marketing hero.
-- Keep green for actions, recommendation badges, and active progress only.
-- Use white and near-white bento surfaces with soft borders and restrained glass.
-- Product imagery should be small, useful, and tied to basket contents, not decorative.
-- Loading, demo, and error states must explain catalog status without feeling technical.
+- Pixel-art basket and products: brand, onboarding, loader, empty and success states, sharing.
+- Lucide: system controls only.
+- No decorative emoji at the same semantic level.
+
+## Posture rules
+
+- Начинать с task composer, не с marketing hero.
+- Адрес запрашивать только после реального запроса или явного действия.
+- Green использовать для бренда, primary action, selected state и положительного сравнения.
+- White and near-white surfaces keep the product readable.
+- Retailer names use neutral source labels; no official affiliation claim.
+- Product imagery is useful and tied to actual basket contents.
+- Errors explain what user can do next without provider jargon.
