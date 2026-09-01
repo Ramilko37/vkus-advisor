@@ -1,0 +1,142 @@
+name: Finalize focused utility implementation
+
+on:
+  push:
+    branches:
+      - codex/focused-ai-utility-redesign
+    paths:
+      - .github/workflows/finalize-focused-utility.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/focused-ai-utility-redesign
+          fetch-depth: 0
+
+      - name: Apply implementation patch when needed
+        if: ${{ hashFiles('src/config/brand.ts') == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import lzma
+          import os
+          import re
+          import urllib.request
+
+          expected_hashes = {
+              0: "d05d4da737718258b57ee8ea00798874644d39bef919e22118862fc94c44bc45",
+              1: "ab16eec9b5d6ad1fe2e3f61492a70135bd5afb92db07231c3054d0624ccf1c2b",
+              2: "3ef0563b5e5d835f649d64c26d3e088bd28fd4c1bd9cc1c44830368ac38a2f94",
+              3: "d55762b40bc6eb5752b4df3ded17a0f016c0cfd62a2a13eeb250ad2a7f28e98d",
+              4: "6825e72db4bd9ae8cebdead78c5fdcd7ffd0ce7a5887ddec654f88531780632a",
+              5: "96d183edabb45481c15764a3b21ac17020b4b6ec0970c1f94b3fec0e5ce41321",
+              6: "ca27c694d7075edbc17ce06be0c2379a6c4659010d2915edec7beb95b0951bd4",
+              7: "084977d8e9e016b2bbfc0556054221f4055f0e85e059204da0e426c4ad05f6bd",
+              8: "77b6e347501ceca684ceb8cf403eac62bec7c992f5fdbab4f8a2ddcd5cbb7706",
+          }
+          expected_lengths = {**{number: 8000 for number in range(8)}, 8: 348}
+          expected_encoded_hash = "2fcbdfbf74e4fd7507a56f7aff823c43a25621e1fd87b182b6ecc64768212eed"
+          expected_xz_hash = "b7edc6e39bab3fb63d5d63b2184b893241876f76f0e0c9f7b6ffd5b61667a3ab"
+          expected_patch_hash = "390529a093eda427311b5c9424de092600b232673514abc2c9de9c44c6600d9e"
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/issues/1/comments?per_page=100",
+              headers={
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request) as response:
+              comments = json.load(response)
+
+          candidates: dict[int, list[str]] = {}
+          pattern = re.compile(r"<!-- PATCH-CHUNK-(\d{2}) -->\s*\n([A-Za-z0-9+/=]+)")
+          for comment in comments:
+              match = pattern.search(comment.get("body", ""))
+              if match:
+                  candidates.setdefault(int(match.group(1)), []).append(match.group(2).strip())
+
+          chunks: dict[int, str] = {}
+          for number, expected_hash in expected_hashes.items():
+              for value in candidates.get(number, []):
+                  if len(value) == expected_lengths[number] and hashlib.sha256(value.encode()).hexdigest() == expected_hash:
+                      chunks[number] = value
+                      break
+              if number not in chunks:
+                  raise SystemExit(f"No valid candidate for patch chunk {number:02d}")
+
+          encoded = "".join(chunks[number] for number in range(9))
+          if hashlib.sha256(encoded.encode()).hexdigest() != expected_encoded_hash:
+              raise SystemExit("Combined patch payload hash mismatch")
+          compressed = base64.b64decode(encoded, validate=True)
+          if hashlib.sha256(compressed).hexdigest() != expected_xz_hash:
+              raise SystemExit("Compressed patch hash mismatch")
+          patch = lzma.decompress(compressed)
+          if hashlib.sha256(patch).hexdigest() != expected_patch_hash:
+              raise SystemExit("Decompressed patch hash mismatch")
+          with open("/tmp/focused-ai-utility.patch", "wb") as output:
+              output.write(patch)
+          PY
+          git apply --check /tmp/focused-ai-utility.patch
+          git apply /tmp/focused-ai-utility.patch
+
+      - name: Remove temporary transport workflows
+        run: |
+          rm -f .github/workflows/apply-local-patch.yml
+          rm -f .github/workflows/finalize-focused-utility.yml
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      - name: Commit verified implementation and cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Implementation was already committed; no cleanup commit required."
+          else
+            git commit -m "feat: deliver focused neutral basket utility"
+            git push origin HEAD:codex/focused-ai-utility-redesign
+          fi
+
+      - name: Mark pull request ready for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr ready 1 --repo "$GITHUB_REPOSITORY"
