@@ -10,7 +10,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,6 +33,10 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Export pnpm store
+        run: |
+          tar -czf tooling/pnpm-store.tar.gz -C "$(pnpm store path)" .
 
       - name: Test
         run: pnpm test
