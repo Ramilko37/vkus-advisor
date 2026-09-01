@@ -22,8 +22,8 @@ jobs:
 
       - name: Export pnpm package
         run: |
-          mkdir -p .tooling
-          npm pack pnpm@9.15.9 --pack-destination .tooling
+          mkdir -p tooling
+          npm pack pnpm@9.15.9 --pack-destination tooling
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -52,21 +52,8 @@ jobs:
             .
             !node_modules
             !.git
-            !.tooling
+            !tooling
           include-hidden-files: true
-          retention-days: 1
-
-      - name: Upload installed workspace
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: installed-workspace
-          path: |
-            .
-            !.git
-            !.tooling
-          include-hidden-files: true
-          compression-level: 1
           retention-days: 1
 
       - name: Upload local tooling
@@ -74,5 +61,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: local-tooling
-          path: .tooling
+          path: tooling
           retention-days: 1
