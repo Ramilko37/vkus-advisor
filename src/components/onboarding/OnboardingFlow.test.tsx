@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PROFILE } from "../../services/profileRepository";
 import { OnboardingFlow } from "./OnboardingFlow";
@@ -20,7 +20,7 @@ describe("address-first flow", () => {
     mocks.resolveDeliveryContext.mockResolvedValue({
       status: "ready",
       address: "г Москва, ул Тверская, д 1",
-      retailers: ["vkusvill", "lenta"],
+      retailers: ["lenta"],
       lentaStore: { id: "525", name: "Лента", address: "Овчинниковская наб., 22/24с1" },
     });
     mocks.suggestAddresses.mockResolvedValue([]);
@@ -59,7 +59,7 @@ describe("address-first flow", () => {
     finishResolution({
       status: "ready",
       address: "г Москва, ул Тверская, д 1",
-      retailers: ["vkusvill", "lenta"],
+      retailers: ["lenta"],
       lentaStore: { id: "525", name: "Лента", address: "Овчинниковская наб., 22/24с1" },
     });
 
@@ -67,7 +67,7 @@ describe("address-first flow", () => {
       address: "г Москва, ул Тверская, д 1",
       lentaStoreId: "525",
     })));
-    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ lentaStoreId: "525" }), ["vkusvill", "lenta"]);
+    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ lentaStoreId: "525" }), ["lenta"]);
   });
 
   it("shows the exact address-not-found state", async () => {
@@ -96,14 +96,14 @@ describe("address-first flow", () => {
     mocks.resolveDeliveryContext.mockResolvedValue({
       status: "ready",
       address: "г Москва, ул Тверская, д 1",
-      retailers: ["vkusvill"],
+      retailers: ["pyaterochka"],
     });
     render(<OnboardingFlow profile={{ ...DEFAULT_PROFILE, lentaStoreId: "old" }} onProfileChange={vi.fn()} onComplete={onComplete} />);
 
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Тверская 1" } });
     fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
-    await waitFor(() => expect(onComplete).toHaveBeenCalledWith(expect.not.objectContaining({ lentaStoreId: expect.anything() }), ["vkusvill"]));
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith(expect.not.objectContaining({ lentaStoreId: expect.anything() }), ["pyaterochka"]));
   });
 
   it("keeps manual input available when geolocation is denied", async () => {
@@ -134,5 +134,21 @@ describe("address-first flow", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Адрес")).toHaveValue("Москва, Новая 2"));
     expect(onProfileChange).not.toHaveBeenCalled();
+  });
+
+  it("does not let stale geolocation overwrite newer manual input", async () => {
+    let finishGeolocation!: (value: string[]) => void;
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: { getCurrentPosition: vi.fn((success: PositionCallback) => success({ coords: { latitude: 55.76, longitude: 37.62 } } as GeolocationPosition)) },
+    });
+    mocks.reverseGeocodeAddress.mockImplementation(() => new Promise((resolve) => { finishGeolocation = resolve; }));
+    render(<OnboardingFlow profile={DEFAULT_PROFILE} onProfileChange={vi.fn()} onComplete={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Использовать геопозицию" }));
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Ручная 7" } });
+    await act(async () => { finishGeolocation(["г Москва, ул Автоматическая, д 1"]); });
+
+    await waitFor(() => expect(screen.getByLabelText("Адрес")).toHaveValue("Москва, Ручная 7"));
   });
 });

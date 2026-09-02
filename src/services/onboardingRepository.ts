@@ -1,9 +1,10 @@
-import type { OnboardingState, OnboardingStatus, OnboardingStep } from "../types/domain";
+import type { OnboardingState, OnboardingStatus, OnboardingStep, Retailer } from "../types/domain";
 
 export const ONBOARDING_STORAGE_KEY = "vkusvill-advisor:onboarding:v1";
 
 const statuses: OnboardingStatus[] = ["not_started", "in_progress", "completed", "dismissed"];
 const steps: OnboardingStep[] = ["value", "delivery", "profile"];
+const retailers: Retailer[] = ["vkusvill", "pyaterochka", "lenta"];
 
 export function createInitialOnboardingState(): OnboardingState {
   return {
@@ -31,6 +32,7 @@ export function loadOnboardingState(): OnboardingState {
       step: legacyRequestStep ? "profile" : value.step as OnboardingStep,
       requestDraft: typeof value.requestDraft === "string" ? value.requestDraft : "",
       ...(typeof value.resolvedAddress === "string" ? { resolvedAddress: value.resolvedAddress } : {}),
+      ...(Array.isArray(value.resolvedRetailers) ? { resolvedRetailers: value.resolvedRetailers.filter((retailer): retailer is Retailer => retailers.includes(retailer as Retailer)) } : {}),
       ...(typeof value.completedAt === "string" ? { completedAt: value.completedAt } : {}),
       resultsHintDismissed: Boolean(value.resultsHintDismissed),
       basketEditHintDismissed: Boolean(value.basketEditHintDismissed),

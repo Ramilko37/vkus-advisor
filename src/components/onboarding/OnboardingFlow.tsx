@@ -31,6 +31,7 @@ export function OnboardingFlow({ profile, onProfileChange, onComplete, onCancel 
   const [geoStatus, setGeoStatus] = useState<"idle" | "loading" | "ready" | "empty" | "denied" | "unsupported" | "error">("idle");
   const dialogRef = useRef<HTMLDivElement>(null);
   const resolutionRef = useRef<AbortController | null>(null);
+  const geolocationRef = useRef<AbortController | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const selectedAddressRef = useRef("");
   const address = draft.address.trim();
@@ -44,6 +45,7 @@ export function OnboardingFlow({ profile, onProfileChange, onComplete, onCancel 
     trackProductEvent("onboarding_shown", { step: "delivery" });
     return () => {
       resolutionRef.current?.abort();
+      geolocationRef.current?.abort();
       document.body.style.overflow = previousOverflow;
       window.setTimeout(() => restoreFocusRef.current?.isConnected && restoreFocusRef.current.focus(), 0);
     };
@@ -80,6 +82,8 @@ export function OnboardingFlow({ profile, onProfileChange, onComplete, onCancel 
   const updateAddress = (value: string) => {
     resolutionRef.current?.abort();
     resolutionRef.current = null;
+    geolocationRef.current?.abort();
+    geolocationRef.current = null;
     setDraft((current) => ({
       ...current,
       address: value,
@@ -135,19 +139,29 @@ export function OnboardingFlow({ profile, onProfileChange, onComplete, onCancel 
       setGeoStatus("unsupported");
       return;
     }
+    geolocationRef.current?.abort();
+    const controller = new AbortController();
+    geolocationRef.current = controller;
     setGeoStatus("loading");
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        void reverseGeocodeAddress(coords.latitude, coords.longitude).then((values) => {
+        if (controller.signal.aborted) return;
+        void reverseGeocodeAddress(coords.latitude, coords.longitude, controller.signal).then((values) => {
+          if (controller.signal.aborted) return;
           if (!values.length) {
             setGeoStatus("empty");
             return;
           }
+          if (geolocationRef.current === controller) geolocationRef.current = null;
           selectAddress(values[0]);
           setGeoStatus("ready");
-        }).catch(() => setGeoStatus("error"));
+        }).catch(() => {
+          if (!controller.signal.aborted) setGeoStatus("error");
+        });
       },
-      (error) => setGeoStatus(error.code === 1 ? "denied" : "error"),
+      (error) => {
+        if (!controller.signal.aborted) setGeoStatus(error.code === 1 ? "denied" : "error");
+      },
       { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
     );
   };

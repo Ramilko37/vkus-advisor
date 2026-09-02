@@ -43,6 +43,7 @@ export interface OnboardingState {
   step: OnboardingStep;
   requestDraft: string;
   resolvedAddress?: string;
+  resolvedRetailers?: Retailer[];
   completedAt?: string;
   resultsHintDismissed: boolean;
   basketEditHintDismissed: boolean;

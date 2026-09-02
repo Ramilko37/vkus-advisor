@@ -64,6 +64,16 @@ describe("ApiCatalogClient", () => {
     });
   });
 
+  it("sends only the retailers resolved for the current address", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok({ mode: "live", products: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiCatalogClient({ ...DEFAULT_PROFILE, address: "Москва, Тверская 1", lentaStoreId: "525" }, ["lenta"]);
+
+    await client.searchProducts({ query: "молоко", purpose: "завтрак", sort: "popularity" });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({ retailers: ["lenta"], lentaStoreId: "525" });
+  });
+
   it("passes profile address to basket validation", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -150,7 +160,7 @@ describe("resolveDeliveryContext", () => {
     await expect(resolveDeliveryContext("Москва, Тверская 1")).resolves.toEqual({
       status: "ready",
       address: "г Москва, ул Тверская, д 1",
-      retailers: ["vkusvill", "pyaterochka"],
+      retailers: ["pyaterochka"],
     });
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "/api/address/suggest",
@@ -183,7 +193,7 @@ describe("resolveDeliveryContext", () => {
     await expect(resolveDeliveryContext("Москва, Тверская 1")).resolves.toEqual({
       status: "ready",
       address: "г Москва, ул Тверская, д 1",
-      retailers: ["vkusvill", "pyaterochka"],
+      retailers: ["pyaterochka"],
     });
   });
 

@@ -563,9 +563,13 @@ async function handleCatalogSearch(req, res) {
   const query = await readJson(req);
   const address = cleanText(stringValue(query.address));
   const lentaStore = selectedLentaStore(query);
-  await ensureMcp(address);
+  const requestedRetailers = Array.isArray(query.retailers)
+    ? new Set(query.retailers.filter((retailer) => ["vkusvill", "pyaterochka", "lenta"].includes(retailer)))
+    : null;
+  const retailerAllowed = (retailer) => !requestedRetailers || requestedRetailers.has(retailer);
+  if (!requestedRetailers || requestedRetailers.has("vkusvill") || requestedRetailers.has("pyaterochka")) await ensureMcp(address);
   const liveProducts = [];
-  if (catalogMode === "live" && mcpClient) {
+  if (retailerAllowed("vkusvill") && catalogMode === "live" && mcpClient) {
     try {
       const cacheKey = `${normalizeCacheKey(query.query)}:${query.sort || "popularity"}:1`;
       const products = await cached(cacheKey, searchCache, inFlightSearches, searchCacheTtlMs, async () => {
@@ -581,7 +585,7 @@ async function handleCatalogSearch(req, res) {
       catalogMode = pyaterochkaMcpClient ? "live" : "demo";
     }
   }
-  if (pyaterochkaMcpClient && pyaterochkaStoreId) {
+  if (retailerAllowed("pyaterochka") && pyaterochkaMcpClient && pyaterochkaStoreId) {
     try {
       const cacheKey = `pyaterochka:${pyaterochkaStoreId}:${normalizeCacheKey(query.query)}:${query.sort || "popularity"}`;
       const products = await cached(cacheKey, searchCache, inFlightSearches, searchCacheTtlMs, async () => {
@@ -603,7 +607,7 @@ async function handleCatalogSearch(req, res) {
       pyaterochkaUnavailableUntil = Date.now() + 60_000;
     }
   }
-  if (lentaEnabled && address && lentaStore.id) {
+  if (retailerAllowed("lenta") && lentaEnabled && address && lentaStore.id) {
     try {
       const products = await getLentaAdapter(address, lentaStore).searchProducts(query, address);
       liveProducts.push(...products);
@@ -612,6 +616,7 @@ async function handleCatalogSearch(req, res) {
     }
   }
   if (liveProducts.length) return send(res, 200, { mode: "live", products: dedupeByXmlId(liveProducts) });
+  if (requestedRetailers) return send(res, 200, { mode: "live", products: [] });
   send(res, 200, { mode: "demo", products: searchDemo(query).slice(0, 5) });
 }
 

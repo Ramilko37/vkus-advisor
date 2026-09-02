@@ -34,7 +34,7 @@ describe("App address-first entry", () => {
     mocks.resolveDeliveryContext.mockResolvedValue({
       status: "ready",
       address: "г Москва, ул Тверская, д 1",
-      retailers: ["vkusvill", "lenta"],
+      retailers: ["lenta"],
       lentaStore: { id: "525", name: "Лента", address: "Москва, Овчинниковская наб., 22/24с1" },
     });
     mocks.authProfile.mockImplementation(() => ({
@@ -70,6 +70,7 @@ describe("App address-first entry", () => {
     expect(screen.queryByRole("dialog", { name: "Адрес доставки" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Что собрать?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Адрес доставки: г Москва, ул Тверская, д 1" })).toBeInTheDocument();
+    expect(mocks.basketPlanner).toHaveBeenLastCalledWith(profile, ["lenta"]);
   });
 
   it("blocks Home while the authenticated profile is loading", () => {
@@ -88,6 +89,7 @@ describe("App address-first entry", () => {
       step: "profile",
       requestDraft: "",
       resolvedAddress: "г Москва, ул Старая, д 1",
+      resolvedRetailers: ["pyaterochka"],
       resultsHintDismissed: false,
       basketEditHintDismissed: false,
     });
@@ -112,7 +114,7 @@ describe("App address-first entry", () => {
     mocks.resolveDeliveryContext.mockResolvedValue({
       status: "ready",
       address: "г Москва, ул Новая, д 2",
-      retailers: ["vkusvill"],
+      retailers: ["pyaterochka"],
     });
     render(<App />);
 

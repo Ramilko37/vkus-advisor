@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, BasketResults, BasketResultsSkeleton, ConversationPanel, EmptyResultsState } from "./components";
 import { FullscreenLoader } from "./components/loader/FullscreenLoader";
 import { useLoaderVisualState } from "./components/loader/useLoaderVisualState";
@@ -8,7 +8,7 @@ import { useBasketPlanner } from "./hooks/useBasketPlanner";
 import { useOnboarding } from "./hooks/useOnboarding";
 import { trackProductEvent } from "./services/productAnalytics";
 import { registerWebMcpTools } from "./services/webMcpTools";
-import type { WorkflowStage } from "./types/domain";
+import type { Retailer, WorkflowStage } from "./types/domain";
 
 const resultsPath = "/results";
 const loadingStages: WorkflowStage[] = ["analyzing", "searching", "composing", "creatingCart"];
@@ -19,10 +19,16 @@ function currentRoute() {
 
 export function App() {
   const authProfile = useAuthProfile();
-  const planner = useBasketPlanner(authProfile.profile);
   const [route, setRoute] = useState<"home" | "results">(currentRoute);
-  const hasResults = planner.state.variants.length > 0;
   const onboarding = useOnboarding({ ready: authProfile.authStatus !== "loading" });
+  const validAddress = authProfile.profile.address.trim().length >= 8 && /\d/.test(authProfile.profile.address);
+  const resolutionMatches = onboarding.state.status === "completed"
+    && normalizeAddressKey(onboarding.state.resolvedAddress) === normalizeAddressKey(authProfile.profile.address);
+  const resolvedRetailers = useMemo<Retailer[]>(() => resolutionMatches
+    ? onboarding.state.resolvedRetailers ?? []
+    : authProfile.profile.lentaStoreId ? ["lenta"] : [], [authProfile.profile.lentaStoreId, onboarding.state.resolvedRetailers, resolutionMatches]);
+  const planner = useBasketPlanner(authProfile.profile, resolvedRetailers);
+  const hasResults = planner.state.variants.length > 0;
   const [addressFlowOpen, setAddressFlowOpen] = useState(false);
   const { mockResults } = planner;
   const firstBasketsTracked = useRef(false);
@@ -31,11 +37,7 @@ export function App() {
   const firstCheckoutTracked = useRef(false);
   const appContentRef = useRef<HTMLDivElement>(null);
   const loading = loadingStages.includes(planner.state.stage);
-  const validAddress = authProfile.profile.address.trim().length >= 8 && /\d/.test(authProfile.profile.address);
-  const hasSavedContext = validAddress && (Boolean(authProfile.profile.lentaStoreId) || (
-    onboarding.state.status === "completed"
-    && normalizeAddressKey(onboarding.state.resolvedAddress) === normalizeAddressKey(authProfile.profile.address)
-  ));
+  const hasSavedContext = validAddress && resolvedRetailers.length > 0;
   const addressGateVisible = authProfile.authStatus !== "loading" && (!hasSavedContext || addressFlowOpen);
   const loaderVisual = useLoaderVisualState(planner.state.stage, hasResults);
   const debugResults = import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "results";
@@ -151,11 +153,11 @@ export function App() {
         <OnboardingFlow
           profile={authProfile.profile}
           onProfileChange={authProfile.updateProfile}
-          onComplete={(nextProfile) => {
+          onComplete={(nextProfile, retailers) => {
             const previousContext = `${authProfile.profile.address}:${authProfile.profile.lentaStoreId || ""}`;
             const nextContext = `${nextProfile.address}:${nextProfile.lentaStoreId || ""}`;
             if (hasSavedContext && previousContext !== nextContext) planner.reset();
-            onboarding.complete(nextProfile.address);
+            onboarding.complete(nextProfile.address, retailers);
             setAddressFlowOpen(false);
           }}
           onCancel={hasSavedContext ? () => setAddressFlowOpen(false) : undefined}

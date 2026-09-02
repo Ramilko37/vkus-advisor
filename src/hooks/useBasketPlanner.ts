@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import type { AppError, BasketIntent, BasketItem, BasketValidation, BasketVariant, CatalogClient, ChatMessage, CheckoutResult, NormalizedProduct, PipelineMetrics, RetailerResult, UserProfile, WorkflowStage } from "../types/domain";
+import type { AppError, BasketIntent, BasketItem, BasketValidation, BasketVariant, CatalogClient, ChatMessage, CheckoutResult, NormalizedProduct, PipelineMetrics, Retailer, RetailerResult, UserProfile, WorkflowStage } from "../types/domain";
 import { analyzeIntent, basketSummary, composeBaskets } from "../services/basketOrchestrator";
 import { BrowserLlmClient, LlmProviderError, getSessionId } from "../services/openRouterClient";
 import { createCatalogClient } from "../services/catalog";
@@ -91,7 +91,7 @@ function reducer(state: PlannerState, action: Action): PlannerState {
   }
 }
 
-export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
+export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retailers?: Retailer[]) {
   const [state, dispatch] = useReducer(reducer, undefined, restorePlannerState);
   const catalogRef = useRef<CatalogClient | null>(null);
   const catalogProfileKeyRef = useRef("");
@@ -100,6 +100,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
   const abortRef = useRef<AbortController | null>(null);
   const llm = useMemo(() => new BrowserLlmClient(), []);
   const sessionId = useMemo(() => getSessionId(), []);
+  const retailerKey = retailers?.join(",") ?? "";
   const { catalogMode, intent, modelNames, retailerResults, selectedId, variants } = state;
 
   useEffect(() => {
@@ -110,7 +111,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
     catalogRef.current = null;
     catalogProfileKeyRef.current = "";
     candidatePoolRef.current = null;
-  }, [profile]);
+  }, [profile, retailerKey]);
 
   const runWorkflow = useCallback(async (message: string) => {
     abortRef.current?.abort();
@@ -162,7 +163,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
         return;
       }
       dispatch({ type: "stage", stage: "searching" });
-      const catalog = await getCatalogForProfile(catalogRef, catalogProfileKeyRef, profile, controller.signal);
+      const catalog = await getCatalogForProfile(catalogRef, catalogProfileKeyRef, profile, retailers, controller.signal);
       dispatch({ type: "catalog", mode: catalog.mode });
       dispatch({ type: "stage", stage: "composing" });
       const fingerprint = buildCatalogFingerprint(intentResult.data, profile.address);
@@ -194,7 +195,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       const appError = toAppError(error);
       dispatch({ type: "error", error: appError, pendingMessage: message });
     }
-  }, [llm, profile, sessionId, state]);
+  }, [llm, profile, retailerKey, retailers, sessionId, state]);
 
   const submit = useCallback(async (message: string) => {
     const trimmed = message.trim();
@@ -222,11 +223,11 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
 
   const reconnectCatalog = useCallback(async () => {
     dispatch({ type: "catalog", mode: "connecting" });
-    const catalog = await createCatalogClient(profile);
+    const catalog = retailers ? await createCatalogClient(profile, undefined, retailers) : await createCatalogClient(profile);
     catalogRef.current = catalog;
-    catalogProfileKeyRef.current = profileCatalogKey(profile);
+    catalogProfileKeyRef.current = profileCatalogKey(profile, retailers);
     dispatch({ type: "catalog", mode: catalog.mode });
-  }, [profile]);
+  }, [profile, retailerKey, retailers]);
 
   const mockResults = useCallback(() => {
     abortRef.current?.abort();
@@ -241,10 +242,10 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
     const isLenta = variant.retailer === "lenta";
     try {
       let catalog = catalogRef.current;
-      const catalogKey = profileCatalogKey(profile);
+      const catalogKey = profileCatalogKey(profile, retailers);
       if (!catalog || catalogProfileKeyRef.current !== catalogKey) {
         dispatch({ type: "catalog", mode: "connecting" });
-        catalog = await createCatalogClient(profile);
+        catalog = retailers ? await createCatalogClient(profile, undefined, retailers) : await createCatalogClient(profile);
         catalogRef.current = catalog;
         catalogProfileKeyRef.current = catalogKey;
         dispatch({ type: "catalog", mode: catalog.mode });
@@ -280,7 +281,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       dispatch({ type: "error", error: { source: "mcp", code: "cart", message: isLenta ? "Не удалось проверить товары Ленты. Обновите корзину или попробуйте позже." : "Не удалось создать ссылку. Список товаров можно скопировать и использовать вручную.", recoverable: true } });
       return null;
     }
-  }, [profile, state]);
+  }, [profile, retailerKey, retailers, state]);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
@@ -372,18 +373,19 @@ async function getCatalogForProfile(
   catalogRef: { current: CatalogClient | null },
   catalogProfileKeyRef: { current: string },
   profile: UserProfile,
+  retailers?: Retailer[],
   signal?: AbortSignal,
 ) {
-  const catalogKey = profileCatalogKey(profile);
+  const catalogKey = profileCatalogKey(profile, retailers);
   if (catalogRef.current && catalogProfileKeyRef.current === catalogKey) return catalogRef.current;
-  const catalog = await createCatalogClient(profile, signal);
+  const catalog = await createCatalogClient(profile, signal, retailers);
   catalogRef.current = catalog;
   catalogProfileKeyRef.current = catalogKey;
   return catalog;
 }
 
-function profileCatalogKey(profile: UserProfile) {
-  return `${profile.address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ")}:${profile.lentaStoreId || ""}`;
+function profileCatalogKey(profile: UserProfile, retailers?: Retailer[]) {
+  return `${profile.address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ")}:${profile.lentaStoreId || ""}:${retailers?.join(",") ?? ""}`;
 }
 
 function isStaleRetailerResult(state: { catalogMode?: PlannerState["catalogMode"]; variants?: BasketVariant[]; retailerResults?: RetailerResult[] }) {
