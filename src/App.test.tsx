@@ -178,6 +178,26 @@ describe("App address-first entry", () => {
     expect(screen.getByLabelText("Что собрать?")).toBeInTheDocument();
   });
 
+  it("does not undo browser Back while restored results stay ready", async () => {
+    profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Тверская, д 1", lentaStoreId: "525" };
+    window.history.replaceState(null, "", "/results");
+    const planner = makePlanner();
+    planner.state = { ...planner.state, stage: "ready", variants: [{
+      id: "vkusvill:balanced", retailer: "vkusvill", strategy: "balanced", storeId: null,
+      title: "Сбалансированная", strategyDescription: "баланс", coverage: { people: 1, days: 1, meals: [], totalMeals: 1, label: "1 приём пищи" },
+      constraints: { exclusions: [], dietaryRestrictions: [], hardBudgetRub: null }, prep: { minutes: 30, complexity: "medium", label: "готовка: средняя" },
+      tradeoffSummary: "Баланс.", deltaToBalanced: { priceRub: 0 }, score: 100, recommended: true,
+      validation: { status: "not_supported", checkedAt: null }, items: [], totalRub: 0, uniqueItemsCount: 0, warnings: [],
+    }] } as never;
+    mocks.basketPlanner.mockReturnValue(planner);
+    render(<App />);
+
+    window.history.pushState(null, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+  });
+
   it("keeps generation on Home until variants are ready", async () => {
     profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Тверская, д 1", lentaStoreId: "525" };
     const planner = makePlanner();

@@ -30,6 +30,8 @@ export function App() {
     : authProfile.profile.lentaStoreId ? ["lenta"] : [], [authProfile.profile.lentaStoreId, onboarding.state.resolvedRetailers, resolutionMatches]);
   const planner = useBasketPlanner(authProfile.profile, resolvedRetailers);
   const hasResults = planner.state.variants.length > 0;
+  const resultsReady = planner.state.stage === "ready" && hasResults;
+  const previousResultsReadyRef = useRef(resultsReady);
   const [addressFlowOpen, setAddressFlowOpen] = useState(false);
   const { mockResults } = planner;
   const firstBasketsTracked = useRef(false);
@@ -60,11 +62,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (planner.state.stage === "ready" && hasResults && route !== "results") {
+    const becameReady = resultsReady && !previousResultsReadyRef.current;
+    previousResultsReadyRef.current = resultsReady;
+    if (becameReady && route !== "results") {
       window.history.pushState(null, "", resultsPath);
       setRoute("results");
     }
-  }, [hasResults, planner.state.stage, route]);
+  }, [resultsReady, route]);
 
   useEffect(() => {
     if (route !== "results" || hasResults || debugResults) return;

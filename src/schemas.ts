@@ -237,3 +237,7 @@ export const basketCompareResponseSchema = z.object({
     }
   }
 });
+
+export const persistedBasketCompareResponseSchema = z.object({
+  variants: z.array(basketVariantSchema.extend({ items: z.array(basketVariantSchema.shape.items.element) })).min(3),
+}).strict();

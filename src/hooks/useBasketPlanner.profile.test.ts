@@ -69,6 +69,27 @@ describe("useBasketPlanner profile", () => {
     expect(result.current.state.variants).toEqual([]);
   });
 
+  it("restores a selected basket after the user removes products", () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1", lentaStoreId: "525" };
+    const variants = testCompareVariants("lenta").map((variant) => ({ ...variant, items: variant.items.slice(0, 1), totalRub: 100, uniqueItemsCount: 1 }));
+    sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
+      schemaVersion: 13,
+      catalogContext: "москва, тверская 1:525:lenta",
+      intent: testIntent(),
+      variants,
+      retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
+      selectedId: "lenta:economy",
+      catalogMode: "live",
+      modelNames: [],
+    }));
+
+    const { result } = renderHook(() => useBasketPlanner(profile, ["lenta"]));
+
+    expect(result.current.state.stage).toBe("ready");
+    expect(result.current.state.selectedId).toBe("lenta:economy");
+    expect(result.current.state.variants.every((variant) => variant.items.length === 1)).toBe(true);
+  });
+
   it("clears visible baskets when the resolved retailer set changes", () => {
     const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1", lentaStoreId: "525" };
     const { result, rerender } = renderHook(

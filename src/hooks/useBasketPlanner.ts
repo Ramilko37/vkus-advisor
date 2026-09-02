@@ -9,7 +9,7 @@ import { validateBasketRequest } from "../services/requestCopy";
 import { replaceBasketItem } from "../services/basketEditing";
 import { DEFAULT_PROFILE } from "../services/profileRepository";
 import { scoreBasketVariants } from "../services/basketValidation";
-import { basketCompareResponseSchema, basketIntentSchema } from "../schemas";
+import { basketCompareResponseSchema, basketIntentSchema, persistedBasketCompareResponseSchema } from "../schemas";
 
 interface PlannerState {
   stage: WorkflowStage;
@@ -354,7 +354,7 @@ function restorePlannerState(catalogContext: string): PlannerState {
     const saved = JSON.parse(raw) as Partial<PlannerState> & { schemaVersion?: number; catalogContext?: string };
     if (saved.schemaVersion !== RESULTS_SCHEMA_VERSION || saved.catalogContext !== catalogContext) return initial;
     const parsedIntent = basketIntentSchema.safeParse(saved.intent);
-    const parsedCompare = basketCompareResponseSchema.safeParse({ variants: saved.variants });
+    const parsedCompare = persistedBasketCompareResponseSchema.safeParse({ variants: saved.variants });
     if (!parsedIntent.success || !parsedCompare.success || isStaleRetailerResult({ ...saved, variants: parsedCompare.data.variants })) return initial;
     const selectedId = typeof saved.selectedId === "string" && parsedCompare.data.variants.some((variant) => variant.id === saved.selectedId) ? saved.selectedId : null;
     return {
