@@ -1,6 +1,7 @@
 import type { BasketIntent, CatalogClient, NormalizedProduct } from "../types/domain";
 import { MAX_RAW_CANDIDATES, MAX_SEARCH_QUERIES, MAX_SEARCH_RESULTS_PER_QUERY } from "./candidateSelection";
 import { deduplicateSearchQueries } from "./intentUtils";
+import { productMatchesTerms } from "./basketValidation";
 
 export async function retrieveCandidateProducts(
   intent: BasketIntent,
@@ -21,7 +22,10 @@ export async function retrieveCandidateProducts(
     || intent.preferences.some((item) => /белк|калор/i.test(item));
   if (!needsDetails) return deduped;
 
-  const detailTargets = deduped.filter((product) => !product.imageUrl || !product.composition).slice(0, 10);
+  const hasHardRestrictions = intent.excludedIngredients.length > 0 || intent.dietaryRestrictions.length > 0;
+  const detailTargets = deduped
+    .filter((product) => !product.imageUrl || !product.composition)
+    .slice(0, hasHardRestrictions ? deduped.length : 10);
   const details = await runLimited(detailTargets, 3, (product) => catalog.getProductDetails(product.id, signal));
   const detailMap = new Map<string, Partial<NormalizedProduct>>();
   details.forEach((result, index) => {
@@ -121,6 +125,5 @@ function completeness(product: NormalizedProduct): number {
 }
 
 function matchesExclusions(product: NormalizedProduct, exclusions: string[]): boolean {
-  const haystack = `${product.name} ${product.description ?? ""} ${product.composition ?? ""}`.toLocaleLowerCase("ru-RU");
-  return exclusions.some((exclusion) => exclusion && haystack.includes(exclusion.toLocaleLowerCase("ru-RU")));
+  return productMatchesTerms(product, exclusions);
 }

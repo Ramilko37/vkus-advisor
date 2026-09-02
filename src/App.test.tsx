@@ -131,7 +131,7 @@ describe("App first-run onboarding", () => {
         storeId: null, title: "Сбалансированная", strategyDescription: "баланс цены и готовки",
         coverage: { people: 1, days: 1, meals: [{ type: "ужин", count: 1 }], totalMeals: 1, label: "1 ужин · 1 человек" },
         constraints: { exclusions: [], dietaryRestrictions: [], hardBudgetRub: null },
-        prep: { minutes: null, complexity: "medium", label: "готовка: средняя" },
+        prep: { minutes: 30, complexity: "medium", label: "готовка: средняя" },
         tradeoffSummary: "Цена и готовка в балансе.", deltaToBalanced: { priceRub: 0 },
         score: 100, recommended: true, validation: { status: "not_supported", checkedAt: null }, items: [],
         totalRub: 100, uniqueItemsCount: 0, warnings: [],

@@ -574,7 +574,7 @@ function makeVariant(retailer: NonNullable<NormalizedProduct["retailer"]>, strat
     strategyDescription: copy.description,
     coverage: { people: 2, days: 3, meals: [{ type: "ужин", count: 3 }], totalMeals: 3, label: "3 ужина · 2 человека" },
     constraints: { exclusions: [], dietaryRestrictions: [], hardBudgetRub: null },
-    prep: { minutes: null, complexity: "medium", label: "готовка: средняя" },
+    prep: { minutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30, complexity: "medium", label: "готовка: средняя" },
     tradeoffSummary: copy.tradeoff,
     deltaToBalanced: { priceRub: 0 },
     score: strategy === "balanced" ? 100 : 0,

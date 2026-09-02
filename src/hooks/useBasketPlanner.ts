@@ -43,7 +43,7 @@ type Action =
   | { type: "reset" };
 
 const RESULTS_STORAGE_KEY = "vkusvill-advisor:last-results";
-const RESULTS_SCHEMA_VERSION = 11;
+const RESULTS_SCHEMA_VERSION = 12;
 
 function createInitialState(): PlannerState {
   return {
@@ -540,7 +540,7 @@ function mockVariant(id: string, strategy: BasketVariant["strategy"], title: str
     strategyDescription,
     coverage: { people: 2, days: 3, meals: [{ type: "ужин", count: 3 }], totalMeals: 3, label: "3 ужина · 2 человека" },
     constraints: { exclusions: ["грибы"], dietaryRestrictions: [], hardBudgetRub: 3000 },
-    prep: strategy === "fast" ? { minutes: null, complexity: "low", label: "готовка: меньше" } : strategy === "economy" ? { minutes: null, complexity: "high", label: "готовка: больше" } : { minutes: null, complexity: "medium", label: "готовка: средняя" },
+    prep: strategy === "fast" ? { minutes: 10, complexity: "low", label: "готовка: меньше" } : strategy === "economy" ? { minutes: 45, complexity: "high", label: "готовка: больше" } : { minutes: 30, complexity: "medium", label: "готовка: средняя" },
     tradeoffSummary,
     deltaToBalanced: { priceRub: 0 },
     score: 0,

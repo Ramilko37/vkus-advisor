@@ -112,6 +112,8 @@ export interface BasketVariantItemDraft {
 export interface BasketVariantDraft {
   retailer?: NonNullable<NormalizedProduct["retailer"]>;
   strategy: BasketStrategy;
+  coverage: BasketCoverage;
+  prepMinutes: number;
   items: BasketVariantItemDraft[];
 }
 
@@ -136,7 +138,7 @@ export interface BasketConstraints {
 }
 
 export interface BasketPrep {
-  minutes: number | null;
+  minutes: number;
   complexity: "low" | "medium" | "high";
   label: string;
 }

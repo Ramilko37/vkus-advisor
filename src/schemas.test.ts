@@ -21,17 +21,17 @@ const baseVariant = {
   title: "Сбалансированная",
   strategyDescription: "баланс цены и готовки",
   totalRub: 1200,
-  uniqueItemsCount: 1,
+  uniqueItemsCount: 4,
   coverage,
   constraints,
-  prep: { minutes: null, complexity: "medium" as const, label: "готовка: средняя" },
+  prep: { minutes: 30, complexity: "medium" as const, label: "готовка: средняя" },
   tradeoffSummary: "Цена и готовка в балансе.",
   deltaToBalanced: { priceRub: 0 },
   score: 70,
   recommended: true,
   retailer: "vkusvill" as const,
   storeId: null,
-  items: [{ id: "1", xmlId: "1", name: "Гречка", priceRub: 100, quantity: 1, role: "Гарнир", reason: "Подходит", sourceQuery: "гречка", isDemo: false }],
+  items: ["1", "2", "3", "4"].map((xmlId) => ({ id: xmlId, xmlId, name: `Товар ${xmlId}`, priceRub: 300, quantity: 1, role: "Основное", reason: "Подходит", sourceQuery: "ужин", isDemo: false })),
   validation: { status: "not_supported" as const, checkedAt: null },
   warnings: [],
 };
@@ -72,5 +72,16 @@ describe("basketCompareResponseSchema", () => {
     value.variants[1] = { ...value.variants[1], recommended: true };
 
     expect(basketCompareResponseSchema.safeParse(value).success).toBe(false);
+  });
+
+  it("rejects hard-budget and strategy tradeoff violations", () => {
+    const overBudget = response();
+    overBudget.variants[0] = { ...overBudget.variants[0], constraints: { ...constraints, hardBudgetRub: 1000 } };
+    expect(basketCompareResponseSchema.safeParse(overBudget).success).toBe(false);
+
+    const wrongTradeoffs = response();
+    wrongTradeoffs.variants[1] = { ...wrongTradeoffs.variants[1], totalRub: 1300 };
+    wrongTradeoffs.variants[2] = { ...wrongTradeoffs.variants[2], prep: { ...wrongTradeoffs.variants[2].prep, minutes: 31 } };
+    expect(basketCompareResponseSchema.safeParse(wrongTradeoffs).success).toBe(false);
   });
 });

@@ -28,9 +28,22 @@ export const basketIntentSchema = z.object({
 export const basketItemRoleSchema = z.enum(["breakfast", "main", "protein", "side", "vegetables", "snack", "ready_food", "drink", "other"]);
 export const basketReasonCodeSchema = z.enum(["good_value", "versatile", "high_protein", "quick", "ready_to_eat", "breakfast_fit", "adds_variety", "budget_fit", "family_fit", "requested_by_user"]);
 
+export const basketCoverageSchema = z.object({
+  people: z.number().int().positive(),
+  days: z.number().int().positive(),
+  meals: z.array(z.object({
+    type: z.string().min(1),
+    count: z.number().int().positive(),
+  }).strict()).min(1),
+  totalMeals: z.number().int().positive(),
+  label: z.string().min(1),
+}).strict();
+
 export const basketVariantDraftSchema = z.object({
   retailer: z.enum(["vkusvill", "lenta", "pyaterochka", "demo"]),
   strategy: z.enum(["balanced", "economy", "fast"]),
+  coverage: basketCoverageSchema,
+  prepMinutes: z.number().int().min(0).max(720),
   items: z.array(z.object({
     xmlId: z.string().min(1).max(64),
     quantity: z.number().int().min(1).max(9),
@@ -88,10 +101,35 @@ export const basketDraftJsonSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["retailer", "strategy", "items"],
+        required: ["retailer", "strategy", "coverage", "prepMinutes", "items"],
         properties: {
           retailer: { type: "string", enum: ["vkusvill", "lenta", "pyaterochka", "demo"] },
           strategy: { type: "string", enum: ["balanced", "economy", "fast"] },
+          coverage: {
+            type: "object",
+            additionalProperties: false,
+            required: ["people", "days", "meals", "totalMeals", "label"],
+            properties: {
+              people: { type: "integer", minimum: 1 },
+              days: { type: "integer", minimum: 1 },
+              meals: {
+                type: "array",
+                minItems: 1,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["type", "count"],
+                  properties: {
+                    type: { type: "string", minLength: 1 },
+                    count: { type: "integer", minimum: 1 },
+                  },
+                },
+              },
+              totalMeals: { type: "integer", minimum: 1 },
+              label: { type: "string", minLength: 1 },
+            },
+          },
+          prepMinutes: { type: "integer", minimum: 0, maximum: 720 },
           items: {
             type: "array",
             minItems: 4,
@@ -116,17 +154,6 @@ export const basketDraftJsonSchema = {
 
 const retailerSchema = z.enum(["vkusvill", "lenta", "pyaterochka", "demo"]);
 
-export const basketCoverageSchema = z.object({
-  people: z.number().int().positive(),
-  days: z.number().int().positive(),
-  meals: z.array(z.object({
-    type: z.string().min(1),
-    count: z.number().int().positive(),
-  }).strict()).min(1),
-  totalMeals: z.number().int().positive(),
-  label: z.string().min(1),
-}).strict();
-
 export const basketVariantSchema = z.object({
   id: z.string().min(1),
   retailer: retailerSchema,
@@ -143,7 +170,7 @@ export const basketVariantSchema = z.object({
     hardBudgetRub: z.number().positive().nullable(),
   }).strict(),
   prep: z.object({
-    minutes: z.number().int().nonnegative().nullable(),
+    minutes: z.number().int().nonnegative(),
     complexity: z.enum(["low", "medium", "high"]),
     label: z.string().min(1),
   }).strict(),
@@ -165,7 +192,7 @@ export const basketVariantSchema = z.object({
     reason: z.string().min(1),
     sourceQuery: z.string(),
     isDemo: z.boolean(),
-  }).passthrough()),
+  }).passthrough()).min(4),
   warnings: z.array(z.string()),
 }).strict();
 
@@ -189,6 +216,24 @@ export const basketCompareResponseSchema = z.object({
     }
     if (group.filter((variant) => variant.recommended).length !== 1) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Retailer group ${key} must have exactly one recommendation` });
+    }
+    for (const variant of group) {
+      const computedTotal = Math.round(variant.items.reduce((sum, item) => sum + item.priceRub * item.quantity, 0));
+      if (variant.totalRub !== computedTotal || variant.uniqueItemsCount !== variant.items.length) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Retailer group ${key} has inconsistent computed totals` });
+      }
+      if (variant.constraints.hardBudgetRub !== null && variant.totalRub > variant.constraints.hardBudgetRub) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Retailer group ${key} exceeds hard budget` });
+      }
+    }
+    const balanced = group.find((variant) => variant.strategy === "balanced");
+    const economy = group.find((variant) => variant.strategy === "economy");
+    const fast = group.find((variant) => variant.strategy === "fast");
+    if (balanced && economy && economy.totalRub > balanced.totalRub) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Retailer group ${key} has an economy strategy above balanced price` });
+    }
+    if (balanced && fast && fast.prep.minutes > balanced.prep.minutes) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Retailer group ${key} has a fast strategy above balanced prep time` });
     }
   }
 });

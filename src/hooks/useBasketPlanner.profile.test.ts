@@ -150,17 +150,18 @@ describe("useBasketPlanner profile", () => {
       role: "breakfast",
       reason: "Подходит под запрос",
     };
+    const savedVariants = testCompareVariants("lenta", item);
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 11,
+      schemaVersion: 12,
       intent: testIntent(),
-      variants: testCompareVariants("lenta", item),
+      variants: savedVariants,
       retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
       selectedId: "lenta:balanced",
       catalogMode: "live",
       modelNames: [],
     }));
     const validateBasketItems = vi.fn().mockResolvedValue({
-      products: [{ ...item, priceRub: 125, quantity: undefined, role: undefined, reason: undefined }],
+      products: savedVariants[0].items.map((savedItem) => ({ ...savedItem, priceRub: savedItem.xmlId === item.xmlId ? 125 : savedItem.priceRub, quantity: undefined, role: undefined, reason: undefined })),
       unavailableXmlIds: [],
       changedPrices: [{ xmlId: item.xmlId, oldPriceRub: 100, newPriceRub: 125 }],
     });
@@ -179,13 +180,13 @@ describe("useBasketPlanner profile", () => {
       checkout = await result.current.createCart();
     });
 
-    expect(validateBasketItems).toHaveBeenCalledWith([{ xmlId: "lenta:100", quantity: 2, priceRub: 100 }]);
+    expect(validateBasketItems).toHaveBeenCalledWith(savedVariants[0].items.map((savedItem) => ({ xmlId: savedItem.xmlId, quantity: savedItem.quantity, priceRub: savedItem.priceRub })));
     expect(createCartLink).not.toHaveBeenCalled();
     expect(checkout!).toEqual({
       url: "https://lenta.com/basket/",
-      items: [expect.objectContaining({ xmlId: "lenta:100", quantity: 2, priceRub: 125, role: "breakfast", reason: "Подходит под запрос" })],
+      items: expect.arrayContaining([expect.objectContaining({ xmlId: "lenta:100", quantity: 2, priceRub: 125, role: "breakfast", reason: "Подходит под запрос" })]),
     });
-    expect(result.current.state.variants[0].totalRub).toBe(250);
+    expect(result.current.state.variants[0].totalRub).toBe(savedVariants[0].totalRub + 50);
     expect(result.current.state.variants[0].validation.status).toBe("validated");
   });
 
@@ -203,7 +204,7 @@ describe("useBasketPlanner profile", () => {
       reason: "Подходит под запрос",
     };
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 11,
+      schemaVersion: 12,
       intent: testIntent(),
       variants: testCompareVariants("lenta", item),
       retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
@@ -233,7 +234,7 @@ describe("useBasketPlanner profile", () => {
       reason: "Подходит под запрос",
     };
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 11,
+      schemaVersion: 12,
       intent: testIntent(),
       variants: testCompareVariants("lenta", item),
       retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
@@ -303,7 +304,7 @@ describe("useBasketPlanner profile", () => {
 
   it("ignores current-version results that do not satisfy the Compare contract", () => {
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 11,
+      schemaVersion: 12,
       intent: testIntent(),
       variants: [{
         id: "demo:balanced",
@@ -373,7 +374,7 @@ describe("useBasketPlanner profile", () => {
 
   it("restores retailer diagnostics from saved results", () => {
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 11,
+      schemaVersion: 12,
       intent: testIntent(),
       variants: testCompareVariants("vkusvill"),
       retailerResults: [
@@ -421,6 +422,21 @@ function testIntent(): BasketIntent {
 
 function testCompareVariants(retailer: "vkusvill" | "lenta", item?: BasketItem): BasketVariant[] {
   const strategies = ["balanced", "economy", "fast"] as const;
+  const items = item
+    ? [item, ...[1, 2, 3].map((index): BasketItem => ({ ...item, id: `${item.id}:${index}`, xmlId: `${item.xmlId}:${index}`, quantity: 1 }))]
+    : [1, 2, 3, 4].map((index): BasketItem => ({
+      id: `${retailer}:${index}`,
+      xmlId: `${retailer}:${index}`,
+      retailer,
+      name: `Товар ${index}`,
+      priceRub: 100,
+      quantity: 1,
+      role: "main",
+      reason: "Подходит под запрос",
+      sourceQuery: "ужин",
+      isDemo: false,
+    }));
+  const totalRub = items.reduce((sum, basketItem) => sum + basketItem.priceRub * basketItem.quantity, 0);
   return strategies.map((strategy, index) => ({
     id: `${retailer}:${strategy}`,
     retailer,
@@ -430,7 +446,7 @@ function testCompareVariants(retailer: "vkusvill" | "lenta", item?: BasketItem):
     strategyDescription: "Описание стратегии",
     coverage: { people: 2, days: 3, meals: [{ type: "ужин", count: 3 }], totalMeals: 3, label: "3 ужина · 2 человека" },
     constraints: { exclusions: [], dietaryRestrictions: [], hardBudgetRub: 3000 },
-    prep: { minutes: null, complexity: "medium", label: "готовка: средняя" },
+    prep: { minutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30, complexity: "medium", label: "готовка: средняя" },
     tradeoffSummary: "Компромисс стратегии.",
     deltaToBalanced: { priceRub: 0 },
     score: index === 0 ? 100 : 80 - index,
@@ -438,9 +454,9 @@ function testCompareVariants(retailer: "vkusvill" | "lenta", item?: BasketItem):
     validation: retailer === "lenta"
       ? { status: "validated", checkedAt: "2026-09-02T10:00:00.000Z" }
       : { status: "not_supported", checkedAt: null },
-    items: item ? [item] : [],
-    totalRub: item ? item.priceRub * item.quantity : 0,
-    uniqueItemsCount: item ? 1 : 0,
+    items,
+    totalRub,
+    uniqueItemsCount: items.length,
     warnings: [],
   }));
 }

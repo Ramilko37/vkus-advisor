@@ -54,7 +54,7 @@ function makeVariant(overrides: Partial<BasketVariant> = {}): BasketVariant {
     uniqueItemsCount: 1,
     coverage: { people: 2, days: 3, meals: [{ type: "ужин", count: 3 }], totalMeals: 3, label: "3 ужина · 2 человека" },
     constraints: { exclusions: [], dietaryRestrictions: [], hardBudgetRub: 3000 },
-    prep: { minutes: null, complexity: "high", label: "готовка: больше" },
+    prep: { minutes: 45, complexity: "high", label: "готовка: больше" },
     tradeoffSummary: "По цене выше баланса, проверьте состав.",
     deltaToBalanced: { priceRub: 200 },
     score: 84,
