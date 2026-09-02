@@ -1316,7 +1316,7 @@ button:disabled {
 }
 
 .basket-step {
-  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  padding-bottom: calc(112px + env(safe-area-inset-bottom));
 }
 
 .basket-step-header {
@@ -1339,6 +1339,13 @@ button:disabled {
   margin: var(--space-1) 0 0;
   color: var(--text-secondary);
   font-size: 18px;
+}
+
+.selected-basket .basket-store-context {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: 15px;
 }
 
 .rows {
@@ -1438,13 +1445,6 @@ button:disabled {
   border-radius: var(--radius-pill);
 }
 
-.replace-button {
-  min-height: 40px;
-  padding-inline: var(--space-3);
-  font-size: 14px;
-  white-space: nowrap;
-}
-
 .row-price {
   grid-column: 2;
   grid-row: 2;
@@ -1462,8 +1462,27 @@ button:disabled {
   color: var(--warning);
 }
 
-.undo-button {
-  justify-self: start;
+.basket-toast {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  width: fit-content;
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-3);
+  background: var(--text-primary);
+  color: var(--surface);
+}
+
+.basket-toast button {
+  min-height: 36px;
+  border: 0;
+  padding: 0 var(--space-2);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: var(--font-weight-action);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .variant-warnings {

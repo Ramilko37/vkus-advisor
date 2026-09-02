@@ -701,6 +701,40 @@ describe("SelectedBasketActions", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows an honest basket summary and supports remove with undo", () => {
+    const onItems = vi.fn();
+    const variant = makeVariant("vkusvill", "balanced", "Творог ВкусВилл");
+    variant.validation = { status: "validated", checkedAt: "2026-09-02T12:00:00.000Z" };
+    variant.items[0].imageUrl = "https://example.com/tvorog.jpg";
+    variant.items[0].storeAddress = "ул Тверская, д 7";
+    variant.items.push({ ...variant.items[0], id: "vkusvill:kefir", xmlId: "vkusvill:kefir", name: "Кефир", imageUrl: undefined, priceRub: 50 });
+    variant.totalRub = 150;
+    variant.uniqueItemsCount = 2;
+    const props = { mode: "live" as const, creating: false, onItems, onCreateCart: vi.fn().mockResolvedValue(null) };
+    const { container, rerender } = render(<SelectedBasketActions variant={variant} {...props} />);
+
+    expect(screen.getByRole("heading", { name: "Сбалансированная корзина" })).toBeInTheDocument();
+    expect(screen.getByText("3 ужина · 2 человека")).toBeInTheDocument();
+    expect(screen.getByText(/ВкусВилл · ул Тверская, д 7/)).toBeInTheDocument();
+    expect(screen.getAllByText("Цена актуальна")).toHaveLength(2);
+    expect(container.querySelector('img[src="https://example.com/tvorog.jpg"]')).toBeInTheDocument();
+    expect(screen.queryByText("Checkout")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Скопировать|Заменить/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Удалить" })[0]);
+    expect(onItems).toHaveBeenLastCalledWith([expect.objectContaining({ name: "Кефир" })]);
+
+    const remaining = { ...variant, items: [variant.items[1]], totalRub: 50, uniqueItemsCount: 1 };
+    rerender(<SelectedBasketActions variant={remaining} {...props} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Товар удалён");
+    expect(screen.getAllByText("50 ₽").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Вернуть" }));
+    expect(onItems).toHaveBeenLastCalledWith(expect.arrayContaining([
+      expect.objectContaining({ name: "Кефир" }),
+      expect.objectContaining({ name: "Творог ВкусВилл" }),
+    ]));
+  });
+
   it("copies the refreshed Lenta list and offers the official Lenta basket after validation", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
@@ -715,12 +749,11 @@ describe("SelectedBasketActions", () => {
         mode="live"
         creating={false}
         onItems={vi.fn()}
-        onReplace={vi.fn()}
         onCreateCart={vi.fn().mockResolvedValue({ url: "https://lenta.com/basket/", items: [refreshedItem] })}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Проверить список Ленты" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить список в Ленте" }));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("2 × Молоко Лента — 250 ₽"));
     expect(screen.getByRole("status")).toHaveTextContent("Список проверен и скопирован");

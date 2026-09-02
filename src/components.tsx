@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, MapPin, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ExternalLink, Loader2, MapPin, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { BasketItem, BasketVariant, CheckoutResult, LentaStore, Retailer, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
@@ -834,7 +834,6 @@ export function BasketResults({ planner, deliveryAddress = "", showResultsHint =
           mode={planner.state.catalogMode}
           creating={planner.state.stage === "creatingCart"}
           onItems={(items) => { onBasketEdit?.(selected.retailer); planner.updateItems(selected.id, items); }}
-          onReplace={(xmlId) => { onBasketEdit?.(selected.retailer); planner.replaceItem(selected.id, xmlId); }}
           onCreateCart={planner.createCart}
           onCheckoutClick={() => onCheckoutClick?.(selected.retailer)}
         />
@@ -996,7 +995,7 @@ export function BasketVariantCard({ variant, onSelect }: { variant: BasketVarian
   );
 }
 
-export function BasketItemRow({ item, onQuantity, onDelete, onReplace }: { item: BasketItem; onQuantity: (quantity: number) => void; onDelete: () => void; onReplace: () => void }) {
+export function BasketItemRow({ item, priceStatus, onQuantity, onDelete }: { item: BasketItem; priceStatus: string | null; onQuantity: (quantity: number) => void; onDelete: () => void }) {
   return (
     <div className="basket-row vv-basket-item-row">
       <ProductThumb item={item} />
@@ -1004,7 +1003,7 @@ export function BasketItemRow({ item, onQuantity, onDelete, onReplace }: { item:
         <strong>{item.name}</strong>
         {item.retailer === "lenta" && item.storeName && <span>Лента · {item.storeName}{item.storeAddress ? `, ${item.storeAddress}` : ""}</span>}
         <span>{item.weightLabel ?? roleLabels[item.role] ?? "Продукт"}</span>
-        {item.priceObservedAt && <span>Цена проверена: {formatObservedAt(item.priceObservedAt)}</span>}
+        {priceStatus && <span>{priceStatus}</span>}
         {item.availability === "unavailable" && <span>Нет в наличии</span>}
       </div>
       <div className="basket-row-actions">
@@ -1013,18 +1012,11 @@ export function BasketItemRow({ item, onQuantity, onDelete, onReplace }: { item:
           <b>{item.quantity}</b>
           <button type="button" onClick={() => onQuantity(item.quantity + 1)} disabled={item.quantity >= 9} aria-label="Увеличить"><Plus size={16} /></button>
         </div>
-        <button type="button" className="secondary-button replace-button" onClick={onReplace}>Заменить</button>
         <button type="button" className="icon-button" onClick={onDelete} aria-label="Удалить"><Trash2 size={17} /></button>
       </div>
       <b className="row-price">{Math.round(item.priceRub * item.quantity).toLocaleString("ru-RU")} ₽</b>
     </div>
   );
-}
-
-function formatObservedAt(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
 function ProductThumb({ item }: { item: BasketItem }) {
@@ -1039,15 +1031,15 @@ function ProductThumb({ item }: { item: BasketItem }) {
   );
 }
 
-export function SelectedBasketActions({ variant, mode, creating, onItems, onReplace, onCreateCart, onCheckoutClick }: { variant: BasketVariant; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onReplace: (xmlId: string) => void; onCreateCart: () => Promise<CheckoutResult | null>; onCheckoutClick?: () => void }) {
+export function SelectedBasketActions({ variant, mode, creating, onItems, onCreateCart, onCheckoutClick }: { variant: BasketVariant; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onCreateCart: () => Promise<CheckoutResult | null>; onCheckoutClick?: () => void }) {
   const [cartUrl, setCartUrl] = useState<string | null>(null);
   const [lentaCopyStatus, setLentaCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [removed, setRemoved] = useState<BasketItem | null>(null);
   const presentation = getVariantPresentation(variant);
   const retailer = variant.retailer ?? variant.items[0]?.retailer;
   const isLenta = retailer === "lenta";
-  const list = useMemo(() => formatBasketList(variant.items), [variant.items]);
-  const copy = () => void navigator.clipboard.writeText(list);
+  const firstItem = variant.items[0];
+  const storeContext = [retailer ? retailerLabels[retailer] : null, firstItem?.storeName, firstItem?.storeAddress].filter(Boolean).join(" · ");
   const checkout = async () => {
     onCheckoutClick?.();
     const result = await onCreateCart();
@@ -1078,24 +1070,25 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onRepl
       <section className="selected-basket vv-selected-basket" data-od-id="selected-basket">
         <div className="section-heading">
           <div>
-            <p className="section-kicker">Checkout</p>
-            <h2>{presentation.title}</h2>
+            <p className="section-kicker">Корзина</p>
+            <h2>{presentation.title} корзина</h2>
             <p>{variant.totalRub.toLocaleString("ru-RU")} ₽ · {variant.uniqueItemsCount} позиций</p>
+            <p>{presentation.coverageLabel}</p>
+            {storeContext && <p className="basket-store-context"><MapPin size={16} aria-hidden="true" /> {storeContext}</p>}
           </div>
-          <button className="secondary-button" type="button" onClick={copy}><Copy size={17} /> Скопировать</button>
         </div>
         <div className="rows">
           {variant.items.map((item) => (
             <BasketItemRow
               key={item.xmlId}
               item={item}
+              priceStatus={basketPriceStatus(variant, item)}
               onQuantity={(quantity) => update(item.xmlId, quantity)}
               onDelete={() => remove(item)}
-              onReplace={() => onReplace(item.xmlId)}
             />
           ))}
         </div>
-        {removed && <button className="secondary-button undo-button" type="button" onClick={undoRemove}>Вернуть {removed.name}</button>}
+        {removed && <div className="basket-toast" role="status"><span>Товар удалён ·</span><button type="button" onClick={undoRemove}>Вернуть</button></div>}
         {variant.warnings.length > 0 && (
           <ul className="variant-warnings" aria-label="Предупреждения по корзине">
             {variant.warnings.map((warning) => <li key={warning}>{warning}</li>)}
@@ -1103,10 +1096,10 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onRepl
         )}
         {isLenta && lentaCopyStatus !== "idle" && (
           <p className="demo-note" role="status">
-            {lentaCopyStatus === "copied" ? "Список проверен и скопирован. В Ленте добавьте товары вручную." : "Список проверен. Скопируйте его кнопкой выше и добавьте товары в Ленте вручную."}
+            {lentaCopyStatus === "copied" ? "Список проверен и скопирован. В Ленте добавьте товары вручную." : "Список проверен, но не скопирован. Добавьте товары в Ленте вручную."}
           </p>
         )}
-        {mode === "demo" && <p className="demo-note">Это пример корзины: цены и товары нужны для ориентира. Список можно скопировать.</p>}
+        {mode === "demo" && <p className="demo-note">Это пример корзины: цены и товары нужны для ориентира, оформление недоступно.</p>}
       </section>
       <CheckoutBar
         totalRub={variant.totalRub}
@@ -1124,6 +1117,7 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onRepl
 function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, retailer, onCreateCart }: { totalRub: number; itemCount: number; mode: "live" | "demo" | "connecting"; creating: boolean; cartUrl: string | null; retailer?: BasketVariant["retailer"]; onCreateCart: () => Promise<void> }) {
   const label = `${totalRub.toLocaleString("ru-RU")} ₽`;
   const isLenta = retailer === "lenta";
+  const supported = retailer === "vkusvill" || isLenta;
 
   return (
     <div className="checkout-bar vv-checkout-bar liquid-glass">
@@ -1131,17 +1125,23 @@ function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, retailer, o
         <strong>{label}</strong>
         <span>{itemCount} позиций</span>
       </div>
-      {mode === "demo" ? (
-        <button className="primary-button checkout-button" type="button" disabled>{isLenta ? "Лента недоступна" : "ВкусВилл недоступен"}</button>
+      {mode === "demo" || !supported ? (
+        <button className="primary-button checkout-button" type="button" disabled>{retailer ? `${retailerLabels[retailer]} пока недоступна` : "Оформление недоступно"}</button>
       ) : cartUrl ? (
         <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> {isLenta ? "Открыть Ленту" : "Открыть во ВкусВилл"}</a>
       ) : (
         <button className="primary-button checkout-button" type="button" disabled={creating} onClick={onCreateCart}>
-          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} {isLenta ? "Проверить список Ленты" : "Открыть во ВкусВилл"}
+          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} {isLenta ? "Проверить список в Ленте" : "Открыть во ВкусВилл"}
         </button>
       )}
     </div>
   );
+}
+
+function basketPriceStatus(variant: BasketVariant, item: BasketItem) {
+  if (["partial", "failed", "stale"].includes(variant.validation.status)) return "Цена могла измениться";
+  if (variant.validation.status === "validated" || item.priceObservedAt) return "Цена актуальна";
+  return null;
 }
 
 function formatBasketList(items: BasketItem[]) {
