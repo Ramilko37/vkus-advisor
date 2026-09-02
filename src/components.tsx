@@ -697,7 +697,7 @@ export function CatalogStatus({ mode, onReconnect }: { mode: "live" | "demo" | "
   return (
     <div className="catalog-status demo" aria-live="polite">
       <AlertTriangle size={17} />
-      <span>Показываем пример корзины. Можно скопировать список или попробовать подключить каталог ещё раз.</span>
+      <span>Показываем пример корзины. Можно сравнить состав или попробовать подключить каталог ещё раз.</span>
       <button type="button" onClick={onReconnect}><RefreshCw size={16} /> Повторить</button>
     </div>
   );
@@ -1040,6 +1040,11 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
   const isLenta = retailer === "lenta";
   const firstItem = variant.items[0];
   const storeContext = [retailer ? retailerLabels[retailer] : null, firstItem?.storeName, firstItem?.storeAddress].filter(Boolean).join(" · ");
+  const commitItems = (items: BasketItem[]) => {
+    setCartUrl(null);
+    setLentaCopyStatus("idle");
+    onItems(items);
+  };
   const checkout = async () => {
     onCheckoutClick?.();
     const result = await onCreateCart();
@@ -1054,14 +1059,14 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
     }
     setCartUrl(result.url);
   };
-  const update = (xmlId: string, quantity: number) => onItems(variant.items.map((item) => item.xmlId === xmlId ? { ...item, quantity: Math.min(9, Math.max(1, quantity)) } : item));
+  const update = (xmlId: string, quantity: number) => commitItems(variant.items.map((item) => item.xmlId === xmlId ? { ...item, quantity: Math.min(9, Math.max(1, quantity)) } : item));
   const remove = (item: BasketItem) => {
     setRemoved(item);
-    onItems(variant.items.filter((current) => current.xmlId !== item.xmlId));
+    commitItems(variant.items.filter((current) => current.xmlId !== item.xmlId));
   };
   const undoRemove = () => {
     if (!removed) return;
-    onItems([...variant.items, removed]);
+    commitItems([...variant.items, removed]);
     setRemoved(null);
   };
 
@@ -1162,7 +1167,7 @@ export function DemoModeBanner({ onReconnect }: { onReconnect: () => void }) {
   return (
     <div className="demo-banner">
       <AlertTriangle size={18} />
-      <span>Каталог не ответил, поэтому показываем пример. Его можно открыть, сравнить и скопировать.</span>
+      <span>Каталог не ответил, поэтому показываем пример для сравнения.</span>
       <button type="button" onClick={onReconnect}>Повторить</button>
     </div>
   );

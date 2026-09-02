@@ -737,6 +737,7 @@ describe("SelectedBasketActions", () => {
 
   it("copies the refreshed Lenta list and offers the official Lenta basket after validation", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
+    const onItems = vi.fn();
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     const variant = makeVariant("lenta", "balanced", "Молоко Лента");
     variant.items[0].quantity = 2;
@@ -748,7 +749,7 @@ describe("SelectedBasketActions", () => {
         variant={variant}
         mode="live"
         creating={false}
-        onItems={vi.fn()}
+        onItems={onItems}
         onCreateCart={vi.fn().mockResolvedValue({ url: "https://lenta.com/basket/", items: [refreshedItem] })}
       />,
     );
@@ -759,6 +760,11 @@ describe("SelectedBasketActions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Список проверен и скопирован");
     expect(screen.getByRole("link", { name: "Открыть Ленту" })).toHaveAttribute("href", "https://lenta.com/basket/");
     expect(screen.queryByText("Открыть во ВкусВилл")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Увеличить" }));
+    expect(onItems).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("link", { name: "Открыть Ленту" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Проверить список в Ленте" })).toBeInTheDocument();
   });
 });
 
