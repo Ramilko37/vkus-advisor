@@ -761,7 +761,6 @@ export function BasketResults({ planner, showResultsHint = false, showBasketEdit
   const activeGroup = retailerGroups.find((group) => group.key === activeRetailer) ?? retailerGroups[0];
   const activeVariants = activeGroup?.variants ?? variants;
   const selected = planner.state.variants.find((variant) => variant.id === openedId) ?? null;
-  const selectedPeerVariants = selected ? variants.filter((variant) => getRetailerKey(variant) === getRetailerKey(selected)) : variants;
   const openVariant = (id: string) => {
     const variant = planner.state.variants.find((item) => item.id === id);
     onVariantOpen?.(variant?.retailer);
@@ -797,7 +796,6 @@ export function BasketResults({ planner, showResultsHint = false, showBasketEdit
         </ContextHint>}
         <SelectedBasketActions
           variant={selected}
-          variants={selectedPeerVariants}
           mode={planner.state.catalogMode}
           creating={planner.state.stage === "creatingCart"}
           onItems={(items) => { onBasketEdit?.(selected.retailer); planner.updateItems(selected.id, items); }}
@@ -845,8 +843,6 @@ export function BasketResults({ planner, showResultsHint = false, showBasketEdit
           <BasketVariantCard
             key={variant.id}
             variant={variant}
-            recommended={variant.strategy === "balanced"}
-            variants={activeVariants}
             onSelect={() => openVariant(variant.id)}
           />
         )) : (
@@ -939,8 +935,8 @@ function defaultRetailerKey(groups: Array<{ key: RetailerKey; variants: BasketVa
   return groups.find((group) => group.variants.length > 0)?.key ?? groups[0]?.key ?? "demo";
 }
 
-export function BasketVariantCard({ variant, recommended, variants, onSelect }: { variant: BasketVariant; recommended: boolean; variants: BasketVariant[]; onSelect: () => void }) {
-  const presentation = getVariantPresentation(variant, variants);
+export function BasketVariantCard({ variant, onSelect }: { variant: BasketVariant; onSelect: () => void }) {
+  const presentation = getVariantPresentation(variant);
 
   return (
     <article className="variant-card vv-basket-variant-card" data-od-id={`variant-card-${variant.id}`}>
@@ -950,7 +946,7 @@ export function BasketVariantCard({ variant, recommended, variants, onSelect }: 
             <h2>{presentation.title}</h2>
             <small>{presentation.subtitle}</small>
           </div>
-          {recommended && presentation.recommendationLabel && <strong className="recommend-badge">{presentation.recommendationLabel}</strong>}
+          {presentation.recommendationLabel && <strong className="recommend-badge">{presentation.recommendationLabel}</strong>}
         </div>
         <strong className="price">{variant.totalRub.toLocaleString("ru-RU")} ₽</strong>
         <div className="variant-compare-line">
@@ -1011,11 +1007,11 @@ function ProductThumb({ item }: { item: BasketItem }) {
   );
 }
 
-export function SelectedBasketActions({ variant, variants, mode, creating, onItems, onReplace, onCreateCart, onCheckoutClick }: { variant: BasketVariant; variants: BasketVariant[]; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onReplace: (xmlId: string) => void; onCreateCart: () => Promise<CheckoutResult | null>; onCheckoutClick?: () => void }) {
+export function SelectedBasketActions({ variant, mode, creating, onItems, onReplace, onCreateCart, onCheckoutClick }: { variant: BasketVariant; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onReplace: (xmlId: string) => void; onCreateCart: () => Promise<CheckoutResult | null>; onCheckoutClick?: () => void }) {
   const [cartUrl, setCartUrl] = useState<string | null>(null);
   const [lentaCopyStatus, setLentaCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [removed, setRemoved] = useState<BasketItem | null>(null);
-  const presentation = getVariantPresentation(variant, variants);
+  const presentation = getVariantPresentation(variant);
   const retailer = variant.retailer ?? variant.items[0]?.retailer;
   const isLenta = retailer === "lenta";
   const list = useMemo(() => formatBasketList(variant.items), [variant.items]);

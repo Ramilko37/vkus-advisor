@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, CheckoutResult, NormalizedProduct, PipelineMetrics, RetailerResult, UserProfile, WorkflowStage } from "../types/domain";
+import type { AppError, BasketIntent, BasketItem, BasketValidation, BasketVariant, CatalogClient, ChatMessage, CheckoutResult, NormalizedProduct, PipelineMetrics, RetailerResult, UserProfile, WorkflowStage } from "../types/domain";
 import { analyzeIntent, basketSummary, composeBaskets } from "../services/basketOrchestrator";
 import { BrowserLlmClient, LlmProviderError, getSessionId } from "../services/openRouterClient";
 import { createCatalogClient } from "../services/catalog";
@@ -8,6 +8,8 @@ import { measureStage } from "../services/pipelineMetrics";
 import { validateBasketRequest } from "../services/requestCopy";
 import { replaceBasketItem } from "../services/basketEditing";
 import { DEFAULT_PROFILE } from "../services/profileRepository";
+import { scoreBasketVariants } from "../services/basketValidation";
+import { basketCompareResponseSchema, basketIntentSchema } from "../schemas";
 
 interface PlannerState {
   stage: WorkflowStage;
@@ -35,13 +37,13 @@ type Action =
   | { type: "intent"; intent: BasketIntent }
   | { type: "ready"; intent: BasketIntent; variants: BasketVariant[]; retailerResults: RetailerResult[]; models: string[] }
   | { type: "select"; id: string | null }
-  | { type: "items"; id: string; items: BasketItem[] }
+  | { type: "items"; id: string; items: BasketItem[]; validation?: BasketValidation }
   | { type: "error"; error: AppError; pendingMessage?: string }
   | { type: "clearError" }
   | { type: "reset" };
 
 const RESULTS_STORAGE_KEY = "vkusvill-advisor:last-results";
-const RESULTS_SCHEMA_VERSION = 10;
+const RESULTS_SCHEMA_VERSION = 11;
 
 function createInitialState(): PlannerState {
   return {
@@ -73,7 +75,11 @@ function reducer(state: PlannerState, action: Action): PlannerState {
     case "select":
       return { ...state, selectedId: action.id };
     case "items":
-      return { ...state, variants: state.variants.map((variant) => variant.id === action.id ? recalculate({ ...variant, items: action.items }) : variant) };
+      return { ...state, variants: state.intent ? scoreBasketVariants(state.variants.map((variant) => variant.id === action.id ? recalculate({
+        ...variant,
+        items: action.items,
+        validation: action.validation ?? (variant.retailer === "lenta" ? { status: "stale", checkedAt: null } : variant.validation),
+      }) : variant), state.intent) : state.variants };
     case "error":
       return { ...state, stage: "error", error: action.error, pendingMessage: action.pendingMessage ?? state.pendingMessage };
     case "clearError":
@@ -232,7 +238,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
   const createCart = useCallback(async (): Promise<CheckoutResult | null> => {
     const variant = selectedVariant(state);
     if (!variant) return null;
-    const isLenta = variant.retailer === "lenta" || variant.items.every((item) => item.retailer === "lenta");
+    const isLenta = variant.retailer === "lenta";
     try {
       let catalog = catalogRef.current;
       const catalogKey = profileCatalogKey(profile);
@@ -248,13 +254,21 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       if (isLenta) {
         if (!catalog.validateBasketItems) throw new Error("Lenta basket validation is unavailable");
         const validation = await catalog.validateBasketItems(variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity, priceRub: item.priceRub })));
-        if (validation.unavailableXmlIds.length > 0) throw new Error("Some Lenta basket items are unavailable");
         const products = new Map(validation.products.map((product) => [product.xmlId, product]));
+        if (validation.unavailableXmlIds.length > 0 || variant.items.some((item) => !products.has(item.xmlId))) {
+          throw new Error("Some Lenta basket items could not be validated");
+        }
         const items = variant.items.map((item) => {
           const product = products.get(item.xmlId);
           return product ? { ...item, ...product, quantity: item.quantity, role: item.role, reason: item.reason } : item;
         });
-        dispatch({ type: "items", id: variant.id, items });
+        const observedAt = validation.products.map((product) => product.priceObservedAt).filter((value): value is string => Boolean(value)).sort();
+        dispatch({
+          type: "items",
+          id: variant.id,
+          items,
+          validation: { status: "validated", checkedAt: observedAt[observedAt.length - 1] ?? new Date().toISOString() },
+        });
         dispatch({ type: "stage", stage: "ready" });
         return { url: "https://lenta.com/basket/", items };
       }
@@ -262,6 +276,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       dispatch({ type: "stage", stage: "ready" });
       return { url };
     } catch {
+      if (isLenta) dispatch({ type: "items", id: variant.id, items: variant.items, validation: { status: "failed", checkedAt: null } });
       dispatch({ type: "error", error: { source: "mcp", code: "cart", message: isLenta ? "Не удалось проверить товары Ленты. Обновите корзину или попробуйте позже." : "Не удалось создать ссылку. Список товаров можно скопировать и использовать вручную.", recoverable: true } });
       return null;
     }
@@ -311,8 +326,11 @@ function restorePlannerState(): PlannerState {
     const raw = sessionStorage.getItem(RESULTS_STORAGE_KEY);
     if (!raw) return initial;
     const saved = JSON.parse(raw) as Partial<PlannerState> & { schemaVersion?: number };
-    if (saved.schemaVersion !== RESULTS_SCHEMA_VERSION || !Array.isArray(saved.variants) || saved.variants.length === 0 || !saved.intent || isStaleRetailerResult(saved)) return initial;
-    const selectedId = typeof saved.selectedId === "string" && saved.variants.some((variant) => variant.id === saved.selectedId) ? saved.selectedId : null;
+    if (saved.schemaVersion !== RESULTS_SCHEMA_VERSION) return initial;
+    const parsedIntent = basketIntentSchema.safeParse(saved.intent);
+    const parsedCompare = basketCompareResponseSchema.safeParse({ variants: saved.variants });
+    if (!parsedIntent.success || !parsedCompare.success || isStaleRetailerResult({ ...saved, variants: parsedCompare.data.variants })) return initial;
+    const selectedId = typeof saved.selectedId === "string" && parsedCompare.data.variants.some((variant) => variant.id === saved.selectedId) ? saved.selectedId : null;
     return {
       ...initial,
       stage: "ready",
@@ -320,8 +338,8 @@ function restorePlannerState(): PlannerState {
         ...initial.messages,
         { id: crypto.randomUUID(), role: "assistant", createdAt: Date.now(), content: "Вернул последнюю подборку. Можно выбрать вариант или собрать новую корзину." },
       ],
-      intent: saved.intent,
-      variants: saved.variants,
+      intent: parsedIntent.data,
+      variants: parsedCompare.data.variants,
       retailerResults: normalizeRetailerResults(saved.retailerResults),
       selectedId,
       catalogMode: saved.catalogMode === "live" || saved.catalogMode === "demo" ? saved.catalogMode : "demo",
@@ -416,8 +434,10 @@ const mockIntent: BasketIntent = {
   days: 3,
   meals: ["ужин"],
   budgetRub: 3000,
+  budgetIsHard: true,
   maxCookingMinutes: 35,
   excludedIngredients: ["грибы"],
+  dietaryRestrictions: [],
   preferences: ["простые блюда", "понятный состав"],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -452,15 +472,11 @@ const mockSpeedItems: BasketItem[] = [
   mockItem("debug-304", "Салат овощной с зеленью", 189, 2, "Овощи", "Свежая добавка"),
 ];
 
-const mockVariants: BasketVariant[] = [
-  mockVariant("debug-balanced", "balanced", "Сбалансированная", "Цена и готовка в балансе.", mockBalancedItems, ["Оптимальный баланс бюджета и готовки"]),
-  mockVariant("debug-budget", "budget", "Экономная", "Дешевле, но готовки может быть больше.", mockBudgetItems, ["Минимум стоимости"]),
-  mockVariant("debug-speed", "speed", "Быстрая", "Дороже, зато быстрее.", mockSpeedItems, ["Меньше готовки"]),
-].map((variant, _, variants) => {
-  const balancedTotal = variants.find((item) => item.strategy === "balanced")?.totalRub ?? variant.totalRub;
-  if (variant.strategy !== "budget" || variant.totalRub < balancedTotal) return variant;
-  return { ...variant, title: "Альтернатива", summary: "По цене выше баланса, проверьте состав." };
-});
+const mockVariants: BasketVariant[] = scoreBasketVariants([
+  mockVariant("debug-balanced", "balanced", "Сбалансированная", "баланс цены и готовки", "Цена и готовка в балансе.", mockBalancedItems),
+  mockVariant("debug-economy", "economy", "Экономная", "минимум стоимости", "Дешевле, но готовки может быть больше.", mockBudgetItems),
+  mockVariant("debug-fast", "fast", "Быстрая", "меньше готовки", "Дороже, зато быстрее.", mockSpeedItems),
+], mockIntent);
 
 const mockCandidateProducts: NormalizedProduct[] = [
   ...mockBalancedItems,
@@ -513,14 +529,23 @@ function mockItem(xmlId: string, name: string, priceRub: number, quantity: numbe
   };
 }
 
-function mockVariant(id: string, strategy: BasketVariant["strategy"], title: string, summary: string, items: BasketItem[], tradeoffs: string[]): BasketVariant {
+function mockVariant(id: string, strategy: BasketVariant["strategy"], title: string, strategyDescription: string, tradeoffSummary: string, items: BasketItem[]): BasketVariant {
   const totalRub = Math.round(items.reduce((sum, item) => sum + item.priceRub * item.quantity, 0));
   return {
     id,
+    retailer: "demo",
+    storeId: null,
     strategy,
     title,
-    summary,
-    tradeoffs,
+    strategyDescription,
+    coverage: { people: 2, days: 3, meals: [{ type: "ужин", count: 3 }], totalMeals: 3, label: "3 ужина · 2 человека" },
+    constraints: { exclusions: ["грибы"], dietaryRestrictions: [], hardBudgetRub: 3000 },
+    prep: strategy === "fast" ? { minutes: null, complexity: "low", label: "готовка: меньше" } : strategy === "economy" ? { minutes: null, complexity: "high", label: "готовка: больше" } : { minutes: null, complexity: "medium", label: "готовка: средняя" },
+    tradeoffSummary,
+    deltaToBalanced: { priceRub: 0 },
+    score: 0,
+    recommended: false,
+    validation: { status: "not_supported", checkedAt: null },
     items,
     totalRub,
     uniqueItemsCount: items.length,

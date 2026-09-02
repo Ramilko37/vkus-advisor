@@ -1,8 +1,8 @@
 import { basketPrompt } from "../prompts/basketPrompt";
 import { intentPrompt } from "../prompts/intentPrompt";
-import { basketDraftJsonSchema, basketDraftResponseSchema, basketIntentJsonSchema, basketIntentSchema } from "../schemas";
+import { basketCompareResponseSchema, basketDraftJsonSchema, basketDraftResponseSchema, basketIntentJsonSchema, basketIntentSchema } from "../schemas";
 import type { BasketIntent, BasketItem, BasketItemRole, BasketReasonCode, BasketVariant, BasketVariantDraft, CatalogClient, NormalizedProduct, RetailerResult, StructuredGenerationResult, UserProfile } from "../types/domain";
-import { hydrateAndValidateVariants } from "./basketValidation";
+import { hydrateAndValidateVariants, scoreBasketVariants } from "./basketValidation";
 import { candidatePayloadBytes, selectCandidatesForLlm, toLlmCandidate } from "./candidateSelection";
 import { compactPreviousIntent, normalizeBasketIntent } from "./intentUtils";
 import { measureStage } from "./pipelineMetrics";
@@ -105,11 +105,12 @@ export async function composeBaskets(
   }
   const basketResult = await composeRetailerBaskets(composableGroups, intent, llm, sessionId, signal);
   const llmCandidates = composableGroups.flatMap((group) => group.candidates.map((product) => toLlmCandidate(product, intent)));
-  const variants = await refreshValidatedBasketItems(basketResult.variants, catalog, signal);
+  const variants = scoreBasketVariants(await refreshValidatedBasketItems(basketResult.variants, catalog, signal), intent);
   const strategies = new Set(variants.map((variant) => variant.strategy));
   if (variants.length !== composableGroups.length * 3 || strategies.size !== 3 || variants.some((variant) => variant.items.length === 0)) {
     throw new Error("Модель вернула неподходящий формат. Повторите сборку корзины.");
   }
+  basketCompareResponseSchema.parse({ variants });
   const retailerResults = buildRetailerResults(retailerGroups, selectedGroups, variants);
   return {
     intent,
@@ -167,7 +168,7 @@ async function composeRetailerBaskets(
       return (hydrated.length === 3 ? hydrated : deterministicRetailerVariants(group.candidates, intent)).map((variant) => ({
         ...variant,
         id: group.retailer ? `${group.retailer}:${variant.id}` : variant.id,
-        retailer: group.retailer,
+        retailer: group.retailer ?? "demo",
       }));
     }),
   };
@@ -179,8 +180,8 @@ function deterministicRetailerVariants(candidates: NormalizedProduct[], intent: 
   const quick = [...selected].sort((a, b) => quickScore(b) - quickScore(a));
   const drafts: BasketVariantDraft[] = [
     deterministicDraft("balanced", selected.slice(0, 8)),
-    deterministicDraft("budget", cheap.slice(0, 6)),
-    deterministicDraft("speed", quick.slice(0, 4)),
+    deterministicDraft("economy", cheap.slice(0, 6)),
+    deterministicDraft("fast", quick.slice(0, 4)),
   ];
   return hydrateAndValidateVariants(drafts, selected, intent);
 }
@@ -205,8 +206,8 @@ function roleForProduct(product: NormalizedProduct): BasketItemRole {
 }
 
 function reasonForStrategy(strategy: BasketVariant["strategy"]): BasketReasonCode {
-  if (strategy === "budget") return "budget_fit";
-  if (strategy === "speed") return "quick";
+  if (strategy === "economy") return "budget_fit";
+  if (strategy === "fast") return "quick";
   return "requested_by_user";
 }
 
@@ -282,6 +283,8 @@ async function refreshValidatedBasketItems(variants: BasketVariant[], catalog: C
     const missingRefresh = new Set(uniqueItems
       .filter((item) => !products.has(item.xmlId) && !unavailable.has(item.xmlId))
       .map((item) => item.xmlId));
+    const observedAt = validation.products.map((product) => product.priceObservedAt).filter((value): value is string => Boolean(value)).sort();
+    const checkedAt = observedAt[observedAt.length - 1] ?? new Date().toISOString();
     return variants.map((variant) => recalculateVariant({
       ...variant,
       items: variant.items.flatMap((item) => {
@@ -296,11 +299,15 @@ async function refreshValidatedBasketItems(variants: BasketVariant[], catalog: C
         ...(variant.items.some((item) => changed.has(item.xmlId)) ? ["Цены Ленты обновлены перед показом корзины."] : []),
         ...(variant.items.some((item) => missingRefresh.has(item.xmlId)) ? ["Не удалось обновить часть товаров Ленты. Проверьте цену перед оформлением."] : []),
       ])),
+      validation: variant.retailer === "lenta"
+        ? { status: variant.items.some((item) => missingRefresh.has(item.xmlId)) ? "partial" : "validated", checkedAt }
+        : variant.validation,
     }));
   } catch {
     return variants.map((variant) => ({
       ...variant,
       warnings: Array.from(new Set([...variant.warnings, "Не удалось обновить данные Ленты. Попробуйте ещё раз."])),
+      validation: variant.retailer === "lenta" ? { status: "failed", checkedAt: null } : variant.validation,
     }));
   }
 }

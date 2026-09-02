@@ -8,8 +8,10 @@ const intent: BasketIntent = {
   days: 3,
   meals: ["ужин"],
   budgetRub: null,
+  budgetIsHard: false,
   maxCookingMinutes: 30,
   excludedIngredients: [],
+  dietaryRestrictions: [],
   preferences: [],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -52,6 +54,11 @@ describe("candidate selection", () => {
     const payload = toLlmCandidate(products[0], { ...intent, excludedIngredients: ["молоко"] });
     expect(payload.composition).toHaveLength(240);
     expect(payload.restrictionHits).toEqual(["молоко"]);
+  });
+
+  it("sends composition for dietary restrictions", () => {
+    const payload = toLlmCandidate(products[0], { ...intent, dietaryRestrictions: ["вегетарианство"] });
+    expect(payload.composition).toHaveLength(240);
   });
 
   it("sends nutrition only for protein requests", () => {

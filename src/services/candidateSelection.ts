@@ -41,9 +41,10 @@ export function selectCandidatesForLlm(products: NormalizedProduct[], intent: Ba
 }
 
 export function toLlmCandidate(product: NormalizedProduct, intent: BasketIntent): LlmCandidateProduct {
-  const needsComposition = intent.excludedIngredients.length > 0;
+  const restrictions = [...intent.excludedIngredients, ...intent.dietaryRestrictions];
+  const needsComposition = restrictions.length > 0;
   const needsNutrition = [...intent.preferences, intent.originalRequest].some((value) => /белк|протеин|фитнес|калори|кбжу/i.test(value));
-  const restrictionHits = findRestrictionHits(product, intent.excludedIngredients);
+  const restrictionHits = findRestrictionHits(product, restrictions);
 
   return {
     xmlId: product.xmlId,

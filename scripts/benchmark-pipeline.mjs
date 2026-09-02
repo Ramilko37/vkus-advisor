@@ -56,7 +56,7 @@ const mockProducts = Array.from({ length: 12 }, (_, index) => ({
 }));
 
 const mockBasket = {
-  variants: ["balanced", "budget", "speed"].map((strategy) => ({
+  variants: ["balanced", "economy", "fast"].map((strategy) => ({
     strategy,
     items: mockProducts.slice(0, 4).map((product) => ({ xmlId: product.xmlId, quantity: 1, role: "main", reasonCode: "good_value" })),
   })),

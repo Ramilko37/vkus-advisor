@@ -8,8 +8,10 @@ const intent: BasketIntent = {
   days: 3,
   meals: ["ужин"],
   budgetRub: 300,
+  budgetIsHard: true,
   maxCookingMinutes: 20,
   excludedIngredients: ["грибы"],
+  dietaryRestrictions: [],
   preferences: [],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -32,8 +34,8 @@ describe("hydrateAndValidateVariants", () => {
   it("keeps three strategies, merges duplicates, clamps quantities and recalculates totals", () => {
     const drafts: BasketVariantDraft[] = [
       { strategy: "balanced", items: [{ xmlId: "1", quantity: 10, role: "side", reasonCode: "versatile" }, { xmlId: "1", quantity: 2, role: "side", reasonCode: "versatile" }, { xmlId: "2", quantity: 1, role: "protein", reasonCode: "high_protein" }, { xmlId: "4", quantity: 1, role: "vegetables", reasonCode: "adds_variety" }, { xmlId: "6", quantity: 1, role: "vegetables", reasonCode: "adds_variety" }] },
-      { strategy: "budget", items: [{ xmlId: "1", quantity: 1, role: "side", reasonCode: "budget_fit" }, { xmlId: "2", quantity: 1, role: "protein", reasonCode: "good_value" }, { xmlId: "4", quantity: 1, role: "vegetables", reasonCode: "good_value" }, { xmlId: "6", quantity: 1, role: "vegetables", reasonCode: "good_value" }, { xmlId: "404", quantity: 1, role: "other", reasonCode: "requested_by_user" }] },
-      { strategy: "speed", items: [{ xmlId: "2", quantity: 1, role: "main", reasonCode: "quick" }, { xmlId: "3", quantity: 1, role: "vegetables", reasonCode: "adds_variety" }, { xmlId: "5", quantity: 1, role: "ready_food", reasonCode: "ready_to_eat" }, { xmlId: "6", quantity: 1, role: "vegetables", reasonCode: "quick" }] },
+      { strategy: "economy", items: [{ xmlId: "1", quantity: 1, role: "side", reasonCode: "budget_fit" }, { xmlId: "2", quantity: 1, role: "protein", reasonCode: "good_value" }, { xmlId: "4", quantity: 1, role: "vegetables", reasonCode: "good_value" }, { xmlId: "6", quantity: 1, role: "vegetables", reasonCode: "good_value" }, { xmlId: "404", quantity: 1, role: "other", reasonCode: "requested_by_user" }] },
+      { strategy: "fast", items: [{ xmlId: "2", quantity: 1, role: "main", reasonCode: "quick" }, { xmlId: "3", quantity: 1, role: "vegetables", reasonCode: "adds_variety" }, { xmlId: "5", quantity: 1, role: "ready_food", reasonCode: "ready_to_eat" }, { xmlId: "6", quantity: 1, role: "vegetables", reasonCode: "quick" }] },
     ];
 
     const variants = hydrateAndValidateVariants(drafts, products, intent);
@@ -50,7 +52,7 @@ describe("hydrateAndValidateVariants", () => {
     expect(hydrateAndValidateVariants([
       { strategy: "balanced", items },
       { strategy: "balanced", items },
-      { strategy: "speed", items },
+      { strategy: "fast", items },
     ], products, intent)).toHaveLength(0);
   });
 
@@ -60,12 +62,12 @@ describe("hydrateAndValidateVariants", () => {
 
     const variants = hydrateAndValidateVariants([
       { strategy: "balanced", items: balancedItems },
-      { strategy: "budget", items: expensiveBudgetItems },
-      { strategy: "speed", items: expensiveBudgetItems },
+      { strategy: "economy", items: expensiveBudgetItems },
+      { strategy: "fast", items: expensiveBudgetItems },
     ], products, intent);
 
-    expect(variants.find((variant) => variant.strategy === "budget")?.title).toBe("Альтернатива");
-    expect(variants.find((variant) => variant.strategy === "budget")?.summary).toBe("По цене выше баланса, проверьте состав.");
+    expect(variants.find((variant) => variant.strategy === "economy")?.title).toBe("Экономная");
+    expect(variants.find((variant) => variant.strategy === "economy")?.tradeoffSummary).toBe("По цене выше баланса, проверьте состав.");
   });
 
   it("does not describe the speed variant as more expensive when it is cheaper than balanced", () => {
@@ -74,10 +76,25 @@ describe("hydrateAndValidateVariants", () => {
 
     const variants = hydrateAndValidateVariants([
       { strategy: "balanced", items: balancedItems },
-      { strategy: "budget", items: speedItems },
-      { strategy: "speed", items: speedItems },
+      { strategy: "economy", items: speedItems },
+      { strategy: "fast", items: speedItems },
     ], products, intent);
 
-    expect(variants.find((variant) => variant.strategy === "speed")?.summary).toBe("Быстрее без переплаты.");
+    expect(variants.find((variant) => variant.strategy === "fast")?.tradeoffSummary).toBe("Быстрее без переплаты.");
+  });
+
+  it("returns Compare-ready variants with shared request invariants and a scored recommendation", () => {
+    const variants = hydrateAndValidateVariants([
+      { strategy: "balanced", items: ["2", "4", "5", "6"].map((xmlId) => ({ xmlId, quantity: 2, role: "main" as const, reasonCode: "good_value" as const })) },
+      { strategy: "economy", items: ["1", "2", "4", "6"].map((xmlId) => ({ xmlId, quantity: 1, role: "main" as const, reasonCode: "budget_fit" as const })) },
+      { strategy: "fast", items: ["2", "4", "5", "6"].map((xmlId) => ({ xmlId, quantity: 2, role: "ready_food" as const, reasonCode: "quick" as const })) },
+    ], products, { ...intent, originalRequest: "Ужины на 3 дня для двоих до 3000 ₽ без грибов", budgetRub: 3000, priority: "budget" });
+
+    expect(variants.map((variant) => variant.strategy)).toEqual(["balanced", "economy", "fast"]);
+    expect(variants.every((variant) => variant.coverage.label === "3 ужина · 2 человека")).toBe(true);
+    expect(variants.every((variant) => variant.constraints.hardBudgetRub === 3000)).toBe(true);
+    expect(variants.every((variant) => variant.constraints.exclusions.includes("грибы"))).toBe(true);
+    expect(variants.map((variant) => variant.tradeoffSummary)).toHaveLength(3);
+    expect(variants.filter((variant) => variant.recommended).map((variant) => variant.strategy)).toEqual(["economy"]);
   });
 });

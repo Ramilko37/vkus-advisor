@@ -8,8 +8,10 @@ const baseIntent: BasketIntent = {
   days: 3,
   meals: ["ужин"],
   budgetRub: null,
+  budgetIsHard: false,
   maxCookingMinutes: 30,
   excludedIngredients: ["грибы"],
+  dietaryRestrictions: [],
   preferences: [],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -86,5 +88,38 @@ describe("retrieveCandidateProducts", () => {
     }, {});
 
     expect(counts.pyaterochka).toBe(4);
+  });
+
+  it("loads composition details for dietary restrictions", async () => {
+    let detailsCalls = 0;
+    const catalog: CatalogClient = {
+      mode: "live",
+      async connect() {},
+      async createCartLink() { return ""; },
+      async getProductDetails() {
+        detailsCalls += 1;
+        return { composition: "овощи" };
+      },
+      async searchProducts(query) {
+        return [{
+          id: "1",
+          xmlId: "1",
+          name: "Готовое блюдо",
+          priceRub: 300,
+          imageUrl: "https://example.com/product.webp",
+          sourceQuery: query.query,
+          isDemo: false,
+        }];
+      },
+    };
+
+    const products = await retrieveCandidateProducts({
+      ...baseIntent,
+      excludedIngredients: [],
+      dietaryRestrictions: ["вегетарианство"],
+    }, catalog);
+
+    expect(detailsCalls).toBe(1);
+    expect(products[0].composition).toBe("овощи");
   });
 });

@@ -1,4 +1,6 @@
 export type BasketPriority = "balanced" | "budget" | "speed";
+export type BasketStrategy = "balanced" | "economy" | "fast";
+export type Retailer = "vkusvill" | "pyaterochka" | "lenta" | "demo";
 export type BasketItemRole = "breakfast" | "main" | "protein" | "side" | "vegetables" | "snack" | "ready_food" | "drink" | "other";
 export type BasketReasonCode = "good_value" | "versatile" | "high_protein" | "quick" | "ready_to_eat" | "breakfast_fit" | "adds_variety" | "budget_fit" | "family_fit" | "requested_by_user";
 
@@ -58,8 +60,10 @@ export interface BasketIntent {
   days: number;
   meals: string[];
   budgetRub: number | null;
+  budgetIsHard: boolean;
   maxCookingMinutes: number | null;
   excludedIngredients: string[];
+  dietaryRestrictions: string[];
   preferences: string[];
   readyFoodAllowed: boolean;
   priority: BasketPriority;
@@ -72,7 +76,7 @@ export interface BasketIntent {
 export interface NormalizedProduct {
   id: string;
   xmlId: string;
-  retailer?: "vkusvill" | "pyaterochka" | "lenta" | "demo";
+  retailer?: Retailer;
   name: string;
   priceRub: number;
   oldPriceRub?: number;
@@ -107,7 +111,7 @@ export interface BasketVariantItemDraft {
 
 export interface BasketVariantDraft {
   retailer?: NonNullable<NormalizedProduct["retailer"]>;
-  strategy: BasketPriority;
+  strategy: BasketStrategy;
   items: BasketVariantItemDraft[];
 }
 
@@ -117,13 +121,46 @@ export interface BasketItem extends NormalizedProduct {
   reason: string;
 }
 
+export interface BasketCoverage {
+  people: number;
+  days: number;
+  meals: Array<{ type: string; count: number }>;
+  totalMeals: number;
+  label: string;
+}
+
+export interface BasketConstraints {
+  exclusions: string[];
+  dietaryRestrictions: string[];
+  hardBudgetRub: number | null;
+}
+
+export interface BasketPrep {
+  minutes: number | null;
+  complexity: "low" | "medium" | "high";
+  label: string;
+}
+
+export interface BasketValidation {
+  status: "not_supported" | "validated" | "partial" | "failed" | "stale";
+  checkedAt: string | null;
+}
+
 export interface BasketVariant {
   id: string;
-  retailer?: NormalizedProduct["retailer"];
-  strategy: BasketPriority;
+  retailer: Retailer;
+  storeId: string | null;
+  strategy: BasketStrategy;
   title: string;
-  summary: string;
-  tradeoffs: string[];
+  strategyDescription: string;
+  coverage: BasketCoverage;
+  constraints: BasketConstraints;
+  prep: BasketPrep;
+  tradeoffSummary: string;
+  deltaToBalanced: { priceRub: number };
+  score: number;
+  recommended: boolean;
+  validation: BasketValidation;
   items: BasketItem[];
   totalRub: number;
   uniqueItemsCount: number;

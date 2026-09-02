@@ -15,7 +15,10 @@ export async function retrieveCandidateProducts(
     .filter((product) => !matchesExclusions(product, intent.excludedIngredients));
   const deduped = capRawCandidates(validProducts, MAX_RAW_CANDIDATES, MAX_SEARCH_RESULTS_PER_QUERY);
 
-  const needsDetails = deduped.some((product) => !product.imageUrl) || intent.excludedIngredients.length > 0 || intent.preferences.some((item) => /белк|калор/i.test(item));
+  const needsDetails = deduped.some((product) => !product.imageUrl)
+    || intent.excludedIngredients.length > 0
+    || intent.dietaryRestrictions.length > 0
+    || intent.preferences.some((item) => /белк|калор/i.test(item));
   if (!needsDetails) return deduped;
 
   const detailTargets = deduped.filter((product) => !product.imageUrl || !product.composition).slice(0, 10);

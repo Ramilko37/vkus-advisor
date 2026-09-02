@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PROFILE } from "../services/profileRepository";
-import type { BasketIntent, NormalizedProduct, StructuredGenerationResult } from "../types/domain";
+import type { BasketIntent, BasketItem, BasketVariant, NormalizedProduct, StructuredGenerationResult } from "../types/domain";
 import { useBasketPlanner } from "./useBasketPlanner";
 
 const mocks = vi.hoisted(() => ({
@@ -105,7 +105,7 @@ describe("useBasketPlanner profile", () => {
       return {
         model: "test-model",
         data: {
-          variants: ["balanced", "budget", "speed"].map((strategy) => ({
+          variants: ["balanced", "economy", "fast"].map((strategy) => ({
             strategy,
             items: ids.map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
           })),
@@ -151,21 +151,10 @@ describe("useBasketPlanner profile", () => {
       reason: "Подходит под запрос",
     };
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 10,
+      schemaVersion: 11,
       intent: testIntent(),
-      variants: [{
-        id: "lenta:balanced",
-        retailer: "lenta",
-        strategy: "balanced",
-        title: "Сбалансированная",
-        summary: "",
-        tradeoffs: [],
-        items: [item],
-        totalRub: 200,
-        uniqueItemsCount: 1,
-        warnings: [],
-      }],
-      retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 1 }],
+      variants: testCompareVariants("lenta", item),
+      retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
       selectedId: "lenta:balanced",
       catalogMode: "live",
       modelNames: [],
@@ -197,6 +186,78 @@ describe("useBasketPlanner profile", () => {
       items: [expect.objectContaining({ xmlId: "lenta:100", quantity: 2, priceRub: 125, role: "breakfast", reason: "Подходит под запрос" })],
     });
     expect(result.current.state.variants[0].totalRub).toBe(250);
+    expect(result.current.state.variants[0].validation.status).toBe("validated");
+  });
+
+  it("marks Lenta validation stale after a manual basket edit", () => {
+    const item: BasketItem = {
+      id: "lenta:100",
+      xmlId: "lenta:100",
+      retailer: "lenta",
+      name: "Молоко Лента",
+      priceRub: 100,
+      sourceQuery: "молоко",
+      isDemo: false,
+      quantity: 1,
+      role: "breakfast",
+      reason: "Подходит под запрос",
+    };
+    sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
+      schemaVersion: 11,
+      intent: testIntent(),
+      variants: testCompareVariants("lenta", item),
+      retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
+      selectedId: null,
+      catalogMode: "live",
+      modelNames: [],
+    }));
+
+    const { result } = renderHook(() => useBasketPlanner(DEFAULT_PROFILE));
+    act(() => result.current.updateItems("lenta:balanced", [{ ...item, quantity: 2 }]));
+
+    expect(result.current.state.variants[0].validation).toEqual({ status: "stale", checkedAt: null });
+  });
+
+  it("rejects Lenta checkout when validation omits requested products", async () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1", lentaStoreId: "525" };
+    const item: BasketItem = {
+      id: "lenta:100",
+      xmlId: "lenta:100",
+      retailer: "lenta",
+      name: "Молоко Лента",
+      priceRub: 100,
+      sourceQuery: "молоко",
+      isDemo: false,
+      quantity: 1,
+      role: "breakfast",
+      reason: "Подходит под запрос",
+    };
+    sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
+      schemaVersion: 11,
+      intent: testIntent(),
+      variants: testCompareVariants("lenta", item),
+      retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
+      selectedId: "lenta:balanced",
+      catalogMode: "live",
+      modelNames: [],
+    }));
+    mocks.createCatalogClient.mockResolvedValue({
+      mode: "live",
+      searchProducts: vi.fn(),
+      getProductDetails: vi.fn(),
+      validateBasketItems: vi.fn().mockResolvedValue({ products: [], unavailableXmlIds: [], changedPrices: [] }),
+      createCartLink: vi.fn(),
+    });
+
+    const { result } = renderHook(() => useBasketPlanner(profile));
+    let checkout: Awaited<ReturnType<typeof result.current.createCart>>;
+    await act(async () => {
+      checkout = await result.current.createCart();
+    });
+
+    expect(checkout!).toBeNull();
+    expect(result.current.state.variants[0].validation).toEqual({ status: "failed", checkedAt: null });
+    expect(result.current.state.error?.code).toBe("cart");
   });
 
   it("ignores saved results from stale schemas", () => {
@@ -240,17 +301,45 @@ describe("useBasketPlanner profile", () => {
     expect(result.current.state.variants).toEqual([]);
   });
 
+  it("ignores current-version results that do not satisfy the Compare contract", () => {
+    sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
+      schemaVersion: 11,
+      intent: testIntent(),
+      variants: [{
+        id: "demo:balanced",
+        retailer: "demo",
+        storeId: null,
+        strategy: "balanced",
+        title: "Сбалансированная",
+        items: [],
+        totalRub: 0,
+        uniqueItemsCount: 0,
+        warnings: [],
+      }],
+      selectedId: null,
+      catalogMode: "demo",
+      modelNames: [],
+    }));
+
+    const { result } = renderHook(() => useBasketPlanner(DEFAULT_PROFILE));
+
+    expect(result.current.state.stage).toBe("idle");
+    expect(result.current.state.variants).toEqual([]);
+  });
+
   it("ignores old live results that only contain VkusVill baskets", () => {
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 10,
+      schemaVersion: 11,
       intent: {
         originalRequest: "ужин",
         people: 1,
         days: 1,
         meals: ["ужин"],
         budgetRub: null,
+        budgetIsHard: false,
         maxCookingMinutes: null,
         excludedIngredients: [],
+        dietaryRestrictions: [],
         preferences: [],
         readyFoodAllowed: true,
         priority: "balanced",
@@ -259,7 +348,7 @@ describe("useBasketPlanner profile", () => {
         assumptions: [],
         searchQueries: [{ query: "ужин", purpose: "ужин", sort: "popularity" }],
       },
-      variants: ["balanced", "budget", "speed"].map((strategy) => ({
+      variants: ["balanced", "economy", "fast"].map((strategy) => ({
         id: `vkusvill:${strategy}`,
         retailer: "vkusvill",
         strategy,
@@ -284,35 +373,9 @@ describe("useBasketPlanner profile", () => {
 
   it("restores retailer diagnostics from saved results", () => {
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 10,
-      intent: {
-        originalRequest: "ужин",
-        people: 1,
-        days: 1,
-        meals: ["ужин"],
-        budgetRub: null,
-        maxCookingMinutes: null,
-        excludedIngredients: [],
-        preferences: [],
-        readyFoodAllowed: true,
-        priority: "balanced",
-        needsClarification: false,
-        clarificationQuestion: null,
-        assumptions: [],
-        searchQueries: [{ query: "ужин", purpose: "ужин", sort: "popularity" }],
-      },
-      variants: [{
-        id: "vkusvill:balanced",
-        retailer: "vkusvill",
-        strategy: "balanced",
-        title: "Сбалансированная",
-        summary: "",
-        tradeoffs: [],
-        items: [],
-        totalRub: 0,
-        uniqueItemsCount: 0,
-        warnings: [],
-      }],
+      schemaVersion: 11,
+      intent: testIntent(),
+      variants: testCompareVariants("vkusvill"),
       retailerResults: [
         { retailer: "vkusvill", status: "ready", candidateCount: 12, selectedCandidateCount: 12, variantCount: 3 },
         { retailer: "lenta", status: "failed", candidateCount: 16, selectedCandidateCount: 16, variantCount: 0, message: "Не удалось собрать три валидные корзины." },
@@ -339,16 +402,47 @@ function testIntent(): BasketIntent {
     days: 3,
     meals: ["ужин"],
     budgetRub: 3000,
+    budgetIsHard: true,
     maxCookingMinutes: 30,
     excludedIngredients: [],
+    dietaryRestrictions: [],
     preferences: [],
     readyFoodAllowed: true,
     priority: "budget",
     needsClarification: false,
     clarificationQuestion: null,
     assumptions: [],
-    searchQueries: [{ query: "курица", purpose: "белок", sort: "price_asc" }],
+    searchQueries: [
+      { query: "курица", purpose: "белок", sort: "price_asc" },
+      { query: "овощи", purpose: "гарнир", sort: "price_asc" },
+    ],
   };
+}
+
+function testCompareVariants(retailer: "vkusvill" | "lenta", item?: BasketItem): BasketVariant[] {
+  const strategies = ["balanced", "economy", "fast"] as const;
+  return strategies.map((strategy, index) => ({
+    id: `${retailer}:${strategy}`,
+    retailer,
+    storeId: retailer === "lenta" ? "525" : null,
+    strategy,
+    title: strategy === "balanced" ? "Сбалансированная" : strategy === "economy" ? "Экономная" : "Быстрая",
+    strategyDescription: "Описание стратегии",
+    coverage: { people: 2, days: 3, meals: [{ type: "ужин", count: 3 }], totalMeals: 3, label: "3 ужина · 2 человека" },
+    constraints: { exclusions: [], dietaryRestrictions: [], hardBudgetRub: 3000 },
+    prep: { minutes: null, complexity: "medium", label: "готовка: средняя" },
+    tradeoffSummary: "Компромисс стратегии.",
+    deltaToBalanced: { priceRub: 0 },
+    score: index === 0 ? 100 : 80 - index,
+    recommended: index === 0,
+    validation: retailer === "lenta"
+      ? { status: "validated", checkedAt: "2026-09-02T10:00:00.000Z" }
+      : { status: "not_supported", checkedAt: null },
+    items: item ? [item] : [],
+    totalRub: item ? item.priceRub * item.quantity : 0,
+    uniqueItemsCount: item ? 1 : 0,
+    warnings: [],
+  }));
 }
 
 function testProducts(retailer: "vkusvill" | "lenta"): NormalizedProduct[] {

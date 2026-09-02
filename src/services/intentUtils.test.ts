@@ -8,8 +8,10 @@ const intent: BasketIntent = {
   days: 5,
   meals: ["ужин", "завтрак"],
   budgetRub: 5000,
+  budgetIsHard: true,
   maxCookingMinutes: 30,
   excludedIngredients: [],
+  dietaryRestrictions: [],
   preferences: [],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -35,6 +37,7 @@ describe("intent utils", () => {
   it("keeps fingerprint stable for budget changes and changes for restrictions", () => {
     expect(buildCatalogFingerprint(intent)).toBe(buildCatalogFingerprint({ ...intent, budgetRub: 1000, priority: "budget" }));
     expect(buildCatalogFingerprint(intent)).not.toBe(buildCatalogFingerprint({ ...intent, excludedIngredients: ["молоко"] }));
+    expect(buildCatalogFingerprint(intent)).not.toBe(buildCatalogFingerprint({ ...intent, dietaryRestrictions: ["вегетарианство"] }));
   });
 
   it("changes catalog fingerprint when delivery address changes", () => {

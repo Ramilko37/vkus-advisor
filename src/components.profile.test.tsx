@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BasketResults, ConversationPanel, Header, ProfileControl, SelectedBasketActions } from "./components";
 import { DEFAULT_PROFILE } from "./services/profileRepository";
-import type { BasketPriority, BasketVariant, NormalizedProduct } from "./types/domain";
+import type { BasketStrategy, BasketVariant, NormalizedProduct } from "./types/domain";
 
 describe("ProfileControl", () => {
   afterEach(() => {
@@ -395,14 +395,14 @@ describe("BasketResults", () => {
             intent: null,
             variants: [
               makeVariant("vkusvill", "balanced", "Творог ВкусВилл"),
-              makeVariant("vkusvill", "budget", "Кефир ВкусВилл"),
-              makeVariant("vkusvill", "speed", "Салат ВкусВилл"),
+              makeVariant("vkusvill", "economy", "Кефир ВкусВилл"),
+              makeVariant("vkusvill", "fast", "Салат ВкусВилл"),
               makeVariant("lenta", "balanced", "Молоко Лента"),
-              makeVariant("lenta", "budget", "Гречка Лента"),
-              makeVariant("lenta", "speed", "Курица Лента"),
+              makeVariant("lenta", "economy", "Гречка Лента"),
+              makeVariant("lenta", "fast", "Курица Лента"),
               makeVariant("pyaterochka", "balanced", "Хлеб Пятёрочка"),
-              makeVariant("pyaterochka", "budget", "Яйца Пятёрочка"),
-              makeVariant("pyaterochka", "speed", "Сыр Пятёрочка"),
+              makeVariant("pyaterochka", "economy", "Яйца Пятёрочка"),
+              makeVariant("pyaterochka", "fast", "Сыр Пятёрочка"),
             ],
             selectedId: null,
             error: null,
@@ -448,11 +448,11 @@ describe("BasketResults", () => {
             intent: null,
             variants: [
               makeVariant("vkusvill", "balanced", "Творог ВкусВилл"),
-              makeVariant("vkusvill", "budget", "Кефир ВкусВилл"),
-              makeVariant("vkusvill", "speed", "Салат ВкусВилл"),
+              makeVariant("vkusvill", "economy", "Кефир ВкусВилл"),
+              makeVariant("vkusvill", "fast", "Салат ВкусВилл"),
               makeVariant("lenta", "balanced", "Молоко Лента"),
-              makeVariant("lenta", "budget", "Гречка Лента"),
-              makeVariant("lenta", "speed", "Курица Лента"),
+              makeVariant("lenta", "economy", "Гречка Лента"),
+              makeVariant("lenta", "fast", "Курица Лента"),
             ],
             selectedId: null,
             error: null,
@@ -490,8 +490,8 @@ describe("BasketResults", () => {
             intent: null,
             variants: [
               makeVariant("vkusvill", "balanced", "Творог ВкусВилл"),
-              makeVariant("vkusvill", "budget", "Кефир ВкусВилл"),
-              makeVariant("vkusvill", "speed", "Салат ВкусВилл"),
+              makeVariant("vkusvill", "economy", "Кефир ВкусВилл"),
+              makeVariant("vkusvill", "fast", "Салат ВкусВилл"),
             ],
             retailerResults: [
               { retailer: "vkusvill", status: "ready", candidateCount: 12, selectedCandidateCount: 12, variantCount: 3 },
@@ -542,7 +542,6 @@ describe("SelectedBasketActions", () => {
     render(
       <SelectedBasketActions
         variant={variant}
-        variants={[variant]}
         mode="live"
         creating={false}
         onItems={vi.fn()}
@@ -560,14 +559,27 @@ describe("SelectedBasketActions", () => {
   });
 });
 
-function makeVariant(retailer: NonNullable<NormalizedProduct["retailer"]>, strategy: BasketPriority, productName: string): BasketVariant {
+function makeVariant(retailer: NonNullable<NormalizedProduct["retailer"]>, strategy: BasketStrategy, productName: string): BasketVariant {
+  const copy = strategy === "balanced"
+    ? { title: "Сбалансированная", description: "баланс цены и готовки", tradeoff: "Цена и готовка в балансе." }
+    : strategy === "economy"
+      ? { title: "Экономная", description: "минимум стоимости", tradeoff: "Дешевле, но готовки может быть больше." }
+      : { title: "Быстрая", description: "меньше готовки", tradeoff: "Дороже, зато быстрее." };
   return {
     id: `${retailer}:${strategy}`,
     retailer,
+    storeId: null,
     strategy,
-    title: productName,
-    summary: productName,
-    tradeoffs: [],
+    title: copy.title,
+    strategyDescription: copy.description,
+    coverage: { people: 2, days: 3, meals: [{ type: "ужин", count: 3 }], totalMeals: 3, label: "3 ужина · 2 человека" },
+    constraints: { exclusions: [], dietaryRestrictions: [], hardBudgetRub: null },
+    prep: { minutes: null, complexity: "medium", label: "готовка: средняя" },
+    tradeoffSummary: copy.tradeoff,
+    deltaToBalanced: { priceRub: 0 },
+    score: strategy === "balanced" ? 100 : 0,
+    recommended: strategy === "balanced",
+    validation: { status: "not_supported", checkedAt: null },
     items: [
       {
         id: `${retailer}:${productName}`,

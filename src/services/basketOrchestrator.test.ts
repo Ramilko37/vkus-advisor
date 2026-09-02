@@ -8,8 +8,10 @@ const intent: BasketIntent = {
   days: 3,
   meals: ["ужин"],
   budgetRub: 3000,
+  budgetIsHard: true,
   maxCookingMinutes: 20,
   excludedIngredients: [],
+  dietaryRestrictions: [],
   preferences: [],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -72,8 +74,8 @@ describe("composeBaskets", () => {
           data: {
             variants: [
               { strategy: "balanced", items: ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })) },
-              { strategy: "budget", items: ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "side", reasonCode: "budget_fit" })) },
-              { strategy: "speed", items: ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "ready_food", reasonCode: "quick" })) },
+              { strategy: "economy", items: ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "side", reasonCode: "budget_fit" })) },
+              { strategy: "fast", items: ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "ready_food", reasonCode: "quick" })) },
             ],
           } as T,
         };
@@ -81,7 +83,7 @@ describe("composeBaskets", () => {
     };
 
     const result = await composeBaskets(intent, catalog, model, "session");
-    expect(result.variants.map((variant) => variant.strategy)).toEqual(["balanced", "budget", "speed"]);
+    expect(result.variants.map((variant) => variant.strategy)).toEqual(["balanced", "economy", "fast"]);
     expect(result.variants[0].title).toBe("Сбалансированная");
     expect(result.variants[0].items[0].reason).toBe("Помогает уложиться в бюджет");
     expect(result.retailerResults).toEqual([
@@ -124,7 +126,7 @@ describe("composeBaskets", () => {
               const ids = payload.candidateProducts
                 .filter((product) => product.retailer === retailer)
                 .map((product) => product.xmlId);
-              return ["balanced", "budget", "speed"].map((strategy) => ({
+              return ["balanced", "economy", "fast"].map((strategy) => ({
                 retailer,
                 strategy,
                 items: ids.map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
@@ -140,14 +142,14 @@ describe("composeBaskets", () => {
     expect(result.variants).toHaveLength(9);
     expect(result.variants.map((variant) => variant.id)).toEqual([
       "vkusvill:balanced",
-      "vkusvill:budget",
-      "vkusvill:speed",
+      "vkusvill:economy",
+      "vkusvill:fast",
       "lenta:balanced",
-      "lenta:budget",
-      "lenta:speed",
+      "lenta:economy",
+      "lenta:fast",
       "pyaterochka:balanced",
-      "pyaterochka:budget",
-      "pyaterochka:speed",
+      "pyaterochka:economy",
+      "pyaterochka:fast",
     ]);
     expect(callCount).toBe(1);
     expect(retailersRequested).toEqual(["vkusvill", "lenta", "pyaterochka"]);
@@ -193,7 +195,7 @@ describe("composeBaskets", () => {
           data: {
             variants: payload.retailers.flatMap((retailer) => {
               const ids = payload.candidateProducts.filter((product) => product.retailer === retailer).map((product) => product.xmlId);
-              return ["balanced", "budget", "speed"].map((strategy) => ({
+              return ["balanced", "economy", "fast"].map((strategy) => ({
                 retailer,
                 strategy,
                 items: ids.map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
@@ -235,7 +237,7 @@ describe("composeBaskets", () => {
         return {
           model: "test-model",
           data: {
-            variants: ["balanced", "budget", "speed"].map((strategy) => ({
+            variants: ["balanced", "economy", "fast"].map((strategy) => ({
               retailer: "vkusvill",
               strategy,
               items: vkusvillProducts.map((product) => ({ xmlId: product.xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
@@ -250,8 +252,8 @@ describe("composeBaskets", () => {
     expect(modelCallCount).toBe(1);
     expect(result.variants.map((variant) => variant.id)).toEqual([
       "vkusvill:balanced",
-      "vkusvill:budget",
-      "vkusvill:speed",
+      "vkusvill:economy",
+      "vkusvill:fast",
     ]);
     expect(result.retailerResults).toContainEqual(expect.objectContaining({
       retailer: "lenta",
@@ -288,12 +290,12 @@ describe("composeBaskets", () => {
           model: "test-model",
           data: {
             variants: [
-              ...["balanced", "budget", "speed"].map((strategy) => ({
+              ...["balanced", "economy", "fast"].map((strategy) => ({
                 retailer: "vkusvill",
                 strategy,
                 items: vkusvillIds.map((xmlId) => ({ xmlId, quantity: 2, role: "main", reasonCode: "budget_fit" })),
               })),
-              ...["balanced", "budget", "speed"].map((strategy) => ({
+              ...["balanced", "economy", "fast"].map((strategy) => ({
                 retailer: "lenta",
                 strategy,
                 items: [1, 2, 3, 4].map((index) => ({ xmlId: `unknown:${index}`, quantity: 2, role: "main", reasonCode: "budget_fit" })),
@@ -308,11 +310,11 @@ describe("composeBaskets", () => {
 
     expect(result.variants.map((variant) => variant.id)).toEqual([
       "vkusvill:balanced",
-      "vkusvill:budget",
-      "vkusvill:speed",
+      "vkusvill:economy",
+      "vkusvill:fast",
       "lenta:balanced",
-      "lenta:budget",
-      "lenta:speed",
+      "lenta:economy",
+      "lenta:fast",
     ]);
     expect(callCount).toBe(1);
     expect(result.variants.find((variant) => variant.id === "vkusvill:balanced")?.items[0].quantity).toBe(2);
@@ -391,7 +393,7 @@ describe("composeBaskets", () => {
         return {
           model: "test-model",
           data: {
-            variants: ["balanced", "budget", "speed"].map((strategy) => ({
+            variants: ["balanced", "economy", "fast"].map((strategy) => ({
               strategy,
               items: lentaProducts.map((product) => ({ xmlId: product.xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
             })),
@@ -402,8 +404,9 @@ describe("composeBaskets", () => {
 
     const result = await composeBaskets(intent, validatingCatalog, model, "session");
 
-    expect(result.variants.map((variant) => variant.id)).toEqual(["lenta:balanced", "lenta:budget", "lenta:speed"]);
+    expect(result.variants.map((variant) => variant.id)).toEqual(["lenta:balanced", "lenta:economy", "lenta:fast"]);
     expect(result.variants[0].items).toHaveLength(4);
+    expect(result.variants[0].validation.status).toBe("partial");
     expect(result.variants[0].warnings).toContain("Не удалось обновить часть товаров Ленты. Проверьте цену перед оформлением.");
   });
 
@@ -437,7 +440,7 @@ describe("composeBaskets", () => {
         return {
           model: "test-model",
           data: {
-            variants: ["balanced", "budget", "speed"].map((strategy) => ({
+            variants: ["balanced", "economy", "fast"].map((strategy) => ({
               strategy,
               items: ["lenta:1", "lenta:2", "lenta:3", "lenta:4", "lenta:5"].map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
             })),
@@ -451,6 +454,7 @@ describe("composeBaskets", () => {
     expect(result.variants[0].items.map((item) => item.xmlId)).not.toContain("lenta:2");
     expect(result.variants[0].items.find((item) => item.xmlId === "lenta:1")).toMatchObject({ priceRub: 99, priceObservedAt: "2026-08-29T10:00:00.000Z" });
     expect(result.variants[0].totalRub).toBe(469);
+    expect(result.variants[0].validation).toEqual({ status: "validated", checkedAt: "2026-08-29T10:00:00.000Z" });
     expect(result.variants[0].warnings).toContain("Часть товаров Ленты больше недоступна.");
   });
 });
