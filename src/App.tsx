@@ -154,9 +154,7 @@ export function App() {
           profile={authProfile.profile}
           onProfileChange={authProfile.updateProfile}
           onComplete={(nextProfile, retailers) => {
-            const previousContext = `${authProfile.profile.address}:${authProfile.profile.lentaStoreId || ""}`;
-            const nextContext = `${nextProfile.address}:${nextProfile.lentaStoreId || ""}`;
-            if (hasSavedContext && previousContext !== nextContext) planner.reset();
+            if (hasSavedContext) planner.reset();
             onboarding.complete(nextProfile.address, retailers);
             setAddressFlowOpen(false);
           }}

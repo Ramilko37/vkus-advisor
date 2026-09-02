@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PROFILE } from "../services/profileRepository";
-import type { BasketIntent, BasketItem, BasketVariant, NormalizedProduct, StructuredGenerationResult } from "../types/domain";
+import type { BasketIntent, BasketItem, BasketVariant, NormalizedProduct, Retailer, StructuredGenerationResult } from "../types/domain";
 import { useBasketPlanner } from "./useBasketPlanner";
 
 const mocks = vi.hoisted(() => ({
@@ -48,6 +48,39 @@ describe("useBasketPlanner profile", () => {
     });
 
     expect(mocks.createCatalogClient).toHaveBeenCalledWith(profile);
+  });
+
+  it("does not restore baskets from another retailer context", () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1", lentaStoreId: "525" };
+    sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
+      schemaVersion: 13,
+      catalogContext: "москва, тверская 1:525:vkusvill",
+      intent: testIntent(),
+      variants: testCompareVariants("vkusvill"),
+      retailerResults: [{ retailer: "vkusvill", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
+      selectedId: null,
+      catalogMode: "live",
+      modelNames: [],
+    }));
+
+    const { result } = renderHook(() => useBasketPlanner(profile, ["lenta"]));
+
+    expect(result.current.state.stage).toBe("idle");
+    expect(result.current.state.variants).toEqual([]);
+  });
+
+  it("clears visible baskets when the resolved retailer set changes", () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1", lentaStoreId: "525" };
+    const { result, rerender } = renderHook(
+      ({ retailers }) => useBasketPlanner(profile, retailers),
+      { initialProps: { retailers: ["lenta", "pyaterochka"] as Retailer[] } },
+    );
+    act(() => result.current.mockResults());
+
+    rerender({ retailers: ["lenta"] as Retailer[] });
+
+    expect(result.current.state.stage).toBe("idle");
+    expect(result.current.state.variants).toEqual([]);
   });
 
   it("clears the current basket and its persisted copy for a new search", async () => {
@@ -122,11 +155,14 @@ describe("useBasketPlanner profile", () => {
       };
     });
 
-    const { result } = renderHook(() => useBasketPlanner(profile));
+    const { result, rerender } = renderHook(
+      ({ currentProfile }) => useBasketPlanner(currentProfile),
+      { initialProps: { currentProfile: profile } },
+    );
     await act(async () => {
       await result.current.reconnectCatalog();
     });
-    profile.address = "Москва, новая 2";
+    rerender({ currentProfile: { ...profile, address: "Москва, новая 2" } });
     await act(async () => {
       await result.current.submit("на 3 дня для двоих до 3000");
     });
@@ -152,7 +188,8 @@ describe("useBasketPlanner profile", () => {
     };
     const savedVariants = testCompareVariants("lenta", item);
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 12,
+      schemaVersion: 13,
+      catalogContext: "москва, тверская 1:525:",
       intent: testIntent(),
       variants: savedVariants,
       retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
@@ -204,7 +241,8 @@ describe("useBasketPlanner profile", () => {
       reason: "Подходит под запрос",
     };
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 12,
+      schemaVersion: 13,
+      catalogContext: "::",
       intent: testIntent(),
       variants: testCompareVariants("lenta", item),
       retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
@@ -234,7 +272,8 @@ describe("useBasketPlanner profile", () => {
       reason: "Подходит под запрос",
     };
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 12,
+      schemaVersion: 13,
+      catalogContext: "москва, тверская 1:525:",
       intent: testIntent(),
       variants: testCompareVariants("lenta", item),
       retailerResults: [{ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }],
@@ -304,7 +343,8 @@ describe("useBasketPlanner profile", () => {
 
   it("ignores current-version results that do not satisfy the Compare contract", () => {
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 12,
+      schemaVersion: 13,
+      catalogContext: "::",
       intent: testIntent(),
       variants: [{
         id: "demo:balanced",
@@ -374,7 +414,8 @@ describe("useBasketPlanner profile", () => {
 
   it("restores retailer diagnostics from saved results", () => {
     sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
-      schemaVersion: 12,
+      schemaVersion: 13,
+      catalogContext: "::",
       intent: testIntent(),
       variants: testCompareVariants("vkusvill"),
       retailerResults: [

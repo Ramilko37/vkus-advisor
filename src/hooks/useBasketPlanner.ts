@@ -43,7 +43,7 @@ type Action =
   | { type: "reset" };
 
 const RESULTS_STORAGE_KEY = "vkusvill-advisor:last-results";
-const RESULTS_SCHEMA_VERSION = 12;
+const RESULTS_SCHEMA_VERSION = 13;
 
 function createInitialState(): PlannerState {
   return {
@@ -92,26 +92,33 @@ function reducer(state: PlannerState, action: Action): PlannerState {
 }
 
 export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retailers?: Retailer[]) {
-  const [state, dispatch] = useReducer(reducer, undefined, restorePlannerState);
+  const retailerKey = retailers?.join(",") ?? "";
+  const catalogContext = profileCatalogKey(profile, retailers);
+  const [state, dispatch] = useReducer(reducer, catalogContext, restorePlannerState);
   const catalogRef = useRef<CatalogClient | null>(null);
   const catalogProfileKeyRef = useRef("");
+  const previousCatalogContextRef = useRef(catalogContext);
   const candidatePoolRef = useRef<CandidatePool | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const llm = useMemo(() => new BrowserLlmClient(), []);
   const sessionId = useMemo(() => getSessionId(), []);
-  const retailerKey = retailers?.join(",") ?? "";
   const { catalogMode, intent, modelNames, retailerResults, selectedId, variants } = state;
 
   useEffect(() => {
-    persistPlannerState({ catalogMode, intent, modelNames, retailerResults, selectedId, variants });
-  }, [catalogMode, intent, modelNames, retailerResults, selectedId, variants]);
+    if (previousCatalogContextRef.current !== catalogContext) return;
+    persistPlannerState({ catalogMode, intent, modelNames, retailerResults, selectedId, variants }, catalogContext);
+  }, [catalogContext, catalogMode, intent, modelNames, retailerResults, selectedId, variants]);
 
   useEffect(() => {
     catalogRef.current = null;
     catalogProfileKeyRef.current = "";
     candidatePoolRef.current = null;
-  }, [profile, retailerKey]);
+    if (previousCatalogContextRef.current === catalogContext) return;
+    previousCatalogContextRef.current = catalogContext;
+    sessionStorage.removeItem(RESULTS_STORAGE_KEY);
+    dispatch({ type: "reset" });
+  }, [catalogContext]);
 
   const runWorkflow = useCallback(async (message: string) => {
     abortRef.current?.abort();
@@ -321,13 +328,13 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
   };
 }
 
-function restorePlannerState(): PlannerState {
+function restorePlannerState(catalogContext: string): PlannerState {
   const initial = createInitialState();
   try {
     const raw = sessionStorage.getItem(RESULTS_STORAGE_KEY);
     if (!raw) return initial;
-    const saved = JSON.parse(raw) as Partial<PlannerState> & { schemaVersion?: number };
-    if (saved.schemaVersion !== RESULTS_SCHEMA_VERSION) return initial;
+    const saved = JSON.parse(raw) as Partial<PlannerState> & { schemaVersion?: number; catalogContext?: string };
+    if (saved.schemaVersion !== RESULTS_SCHEMA_VERSION || saved.catalogContext !== catalogContext) return initial;
     const parsedIntent = basketIntentSchema.safeParse(saved.intent);
     const parsedCompare = basketCompareResponseSchema.safeParse({ variants: saved.variants });
     if (!parsedIntent.success || !parsedCompare.success || isStaleRetailerResult({ ...saved, variants: parsedCompare.data.variants })) return initial;
@@ -351,11 +358,12 @@ function restorePlannerState(): PlannerState {
   }
 }
 
-function persistPlannerState(state: Pick<PlannerState, "catalogMode" | "intent" | "modelNames" | "retailerResults" | "selectedId" | "variants">) {
+function persistPlannerState(state: Pick<PlannerState, "catalogMode" | "intent" | "modelNames" | "retailerResults" | "selectedId" | "variants">, catalogContext: string) {
   try {
     if (!state.intent || state.variants.length === 0 || isStaleRetailerResult(state)) return;
     sessionStorage.setItem(RESULTS_STORAGE_KEY, JSON.stringify({
       schemaVersion: RESULTS_SCHEMA_VERSION,
+      catalogContext,
       intent: state.intent,
       variants: state.variants,
       retailerResults: state.retailerResults,
