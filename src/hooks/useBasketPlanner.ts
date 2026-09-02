@@ -111,10 +111,13 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
   }, [catalogContext, catalogMode, intent, modelNames, retailerResults, selectedId, variants]);
 
   useEffect(() => {
+    if (previousCatalogContextRef.current === catalogContext) return;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    activeRequestIdRef.current = null;
     catalogRef.current = null;
     catalogProfileKeyRef.current = "";
     candidatePoolRef.current = null;
-    if (previousCatalogContextRef.current === catalogContext) return;
     previousCatalogContextRef.current = catalogContext;
     sessionStorage.removeItem(RESULTS_STORAGE_KEY);
     dispatch({ type: "reset" });
@@ -171,11 +174,13 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
       }
       dispatch({ type: "stage", stage: "searching" });
       const catalog = await getCatalogForProfile(catalogRef, catalogProfileKeyRef, profile, retailers, controller.signal);
+      if (!isActive()) return;
       dispatch({ type: "catalog", mode: catalog.mode });
       dispatch({ type: "stage", stage: "composing" });
       const fingerprint = buildCatalogFingerprint(intentResult.data, profile.address);
       const reusablePool = candidatePoolRef.current?.intentFingerprint === fingerprint ? candidatePoolRef.current.products : undefined;
       const measuredBasket = await measureStage(() => composeBaskets(intentResult.data, catalog, llm, sessionId, controller.signal, reusablePool));
+      if (!isActive()) return;
       const result = measuredBasket.result;
       metrics.basketMs = measuredBasket.durationMs - result.catalogSearchMs;
       metrics.catalogSearchMs = result.catalogSearchMs;
@@ -192,7 +197,6 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
       metrics.catalogReused = result.catalogReused;
       metrics.fallbackModelUsed = metrics.fallbackModelUsed || result.basketFallbackModelUsed;
       candidatePoolRef.current = { intentFingerprint: fingerprint, products: result.candidates, createdAt: Date.now() };
-      if (!isActive()) return;
       dispatch({ type: "ready", intent: result.intent, variants: result.variants, retailerResults: result.retailerResults, models: [intentResult.model, ...result.models] });
       dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "assistant", content: "Готово: собрал три варианта корзины. Выберите подходящий и проверьте состав товаров перед оформлением.", createdAt: Date.now() } });
       metrics.totalMs = Math.round(performance.now() - startedAt);

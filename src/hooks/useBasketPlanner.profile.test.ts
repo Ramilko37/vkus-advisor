@@ -83,6 +83,42 @@ describe("useBasketPlanner profile", () => {
     expect(result.current.state.variants).toEqual([]);
   });
 
+  it("ignores an old workflow that finishes after the retailer context changes", async () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1", lentaStoreId: "525" };
+    let finishCatalog!: (client: unknown) => void;
+    mocks.generateStructured.mockImplementation(async <T,>(options: { stage: "intent" | "basket" }): Promise<StructuredGenerationResult<T>> => ({
+      model: "test-model",
+      data: (options.stage === "intent" ? testIntent() : {
+        variants: ["balanced", "economy", "fast"].map((strategy) => ({
+          strategy,
+          items: testProducts("lenta").map(({ xmlId }) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
+        })),
+      }) as T,
+    }));
+    mocks.createCatalogClient.mockImplementation(() => new Promise((resolve) => { finishCatalog = resolve; }));
+    const { result, rerender } = renderHook(
+      ({ retailers }) => useBasketPlanner(profile, retailers),
+      { initialProps: { retailers: ["lenta"] as Retailer[] } },
+    );
+
+    let workflow!: Promise<void>;
+    act(() => { workflow = result.current.submit("на 3 дня для двоих до 3000"); });
+    await waitFor(() => expect(mocks.createCatalogClient).toHaveBeenCalled());
+    rerender({ retailers: ["pyaterochka"] as Retailer[] });
+    await act(async () => {
+      finishCatalog({
+        mode: "live",
+        searchProducts: vi.fn().mockResolvedValue(testProducts("lenta")),
+        getProductDetails: vi.fn(),
+        createCartLink: vi.fn(),
+      });
+      await workflow;
+    });
+
+    expect(result.current.state.stage).toBe("idle");
+    expect(result.current.state.variants).toEqual([]);
+  });
+
   it("clears the current basket and its persisted copy for a new search", async () => {
     const { result } = renderHook(() => useBasketPlanner(DEFAULT_PROFILE));
 
