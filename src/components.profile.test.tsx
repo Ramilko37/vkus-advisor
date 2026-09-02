@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BasketResults, ConversationPanel, Header, ProfileControl, SelectedBasketActions } from "./components";
 import { DEFAULT_PROFILE } from "./services/profileRepository";
-import type { BasketStrategy, BasketVariant, NormalizedProduct } from "./types/domain";
+import type { BasketIntent, BasketStrategy, BasketVariant, NormalizedProduct } from "./types/domain";
 
 describe("ProfileControl", () => {
   afterEach(() => {
@@ -348,6 +348,84 @@ describe("ConversationPanel", () => {
     expect(screen.getByText("Пятёрочка")).toBeInTheDocument();
     expect(screen.queryByText("ВкусВилл")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Овощи" })).not.toBeInTheDocument();
+  });
+
+  it("shows one clarification question with person quick answers", () => {
+    const intent: BasketIntent = {
+      originalRequest: "ужины на три дня",
+      people: 1,
+      days: 3,
+      meals: ["ужин"],
+      budgetRub: null,
+      budgetIsHard: false,
+      maxCookingMinutes: null,
+      excludedIngredients: [],
+      dietaryRestrictions: [],
+      preferences: [],
+      readyFoodAllowed: true,
+      priority: "balanced",
+      needsClarification: true,
+      clarificationQuestion: "На сколько человек собрать?",
+      assumptions: [],
+      searchQueries: [{ query: "ужин", purpose: "ужин", sort: "popularity" }],
+    };
+    const submit = vi.fn();
+    render(
+      <ConversationPanel
+        hasDeliveryAddress
+        planner={{
+          state: { stage: "clarifying", messages: [], intent, variants: [], retailerResults: [], selectedId: null, error: null, catalogMode: "live", modelNames: [], pendingMessage: null },
+          submit, retry: vi.fn(), reconnectCatalog: vi.fn(), mockResults: vi.fn(), createCart: vi.fn(), cancel: vi.fn(), reset: vi.fn(), replaceItem: vi.fn(), selectVariant: vi.fn(), clearVariantSelection: vi.fn(), updateItems: vi.fn(),
+        } as never}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "На сколько человек собрать?" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^(1|2|3|4\+)$/ })).toHaveLength(4);
+    expect(screen.queryByRole("heading", { name: "Что собрать?" })).not.toBeInTheDocument();
+  });
+
+  it("submits a clarification quick answer once", () => {
+    const submit = vi.fn();
+    render(
+      <ConversationPanel
+        hasDeliveryAddress
+        planner={{
+          state: {
+            stage: "clarifying", messages: [], variants: [], retailerResults: [], selectedId: null, error: null, catalogMode: "live", modelNames: [], pendingMessage: null,
+            intent: { originalRequest: "ужины", people: 1, days: 3, meals: ["ужин"], budgetRub: null, budgetIsHard: false, maxCookingMinutes: null, excludedIngredients: [], dietaryRestrictions: [], preferences: [], readyFoodAllowed: true, priority: "balanced", needsClarification: true, clarificationQuestion: "На сколько человек собрать?", assumptions: [], searchQueries: [{ query: "ужин", purpose: "ужин", sort: "popularity" }] },
+          },
+          submit, retry: vi.fn(), reconnectCatalog: vi.fn(), mockResults: vi.fn(), createCart: vi.fn(), cancel: vi.fn(), reset: vi.fn(), replaceItem: vi.fn(), selectVariant: vi.fn(), clearVariantSelection: vi.fn(), updateItems: vi.fn(),
+        } as never}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledWith("На 2 человека");
+  });
+
+  it("restores the pending task for editing after a generation error", () => {
+    const editRequest = vi.fn();
+    render(
+      <ConversationPanel
+        hasDeliveryAddress
+        planner={{
+          state: {
+            stage: "error", messages: [], intent: null, variants: [], retailerResults: [], selectedId: null, catalogMode: "live", modelNames: [],
+            pendingMessage: "ужины на 3 дня для двоих", error: { source: "application", code: "generation", message: "Не удалось собрать варианты.", recoverable: true },
+          },
+          submit: vi.fn(), retry: vi.fn(), editRequest, reconnectCatalog: vi.fn(), mockResults: vi.fn(), createCart: vi.fn(), cancel: vi.fn(), reset: vi.fn(), replaceItem: vi.fn(), selectVariant: vi.fn(), clearVariantSelection: vi.fn(), updateItems: vi.fn(),
+        } as never}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить запрос" }));
+
+    expect(editRequest).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("Что собрать?")).toHaveValue("ужины на 3 дня для двоих");
+    expect(screen.queryByText(/HTTP|API|503/i)).not.toBeInTheDocument();
   });
 });
 

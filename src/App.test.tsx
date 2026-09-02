@@ -160,6 +160,29 @@ describe("App address-first entry", () => {
     expect(window.location.pathname).toBe("/");
     expect(screen.getByLabelText("Что собрать?")).toBeInTheDocument();
   });
+
+  it("keeps generation on Home until variants are ready", async () => {
+    profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Тверская, д 1", lentaStoreId: "525" };
+    const planner = makePlanner();
+    planner.state = { ...planner.state, stage: "searching" } as never;
+    mocks.basketPlanner.mockReturnValue(planner);
+
+    render(<App />);
+
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(screen.getByRole("heading", { name: "Подбираем варианты" })).toBeInTheDocument();
+  });
+
+  it("recovers invalid direct results navigation back to Home", async () => {
+    profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Тверская, д 1", lentaStoreId: "525" };
+    window.history.replaceState(null, "", "/results");
+
+    render(<App />);
+
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(screen.getByLabelText("Что собрать?")).toBeInTheDocument();
+    expect(screen.queryByText("Подборка не найдена")).not.toBeInTheDocument();
+  });
 });
 
 function makePlanner() {

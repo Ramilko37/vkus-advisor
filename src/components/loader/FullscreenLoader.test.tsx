@@ -17,7 +17,10 @@ describe("FullscreenLoader", () => {
   it("keeps the existing pipeline information and bounds active falling sprites", () => {
     render(<FullscreenLoader stage="searching" intent={null} onCancel={vi.fn()} />);
 
-    expect(screen.getByText("Подбираем корзину")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Подбираем варианты" })).toBeInTheDocument();
+    expect(screen.getByText("Поняли задачу")).toBeInTheDocument();
+    expect(screen.getByText("Нашли товары")).toBeInTheDocument();
+    expect(screen.getByText("Собираем варианты")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Отменить" })).toBeInTheDocument();
     expect(screen.getByLabelText("Падающие продукты")).toBeInTheDocument();
 

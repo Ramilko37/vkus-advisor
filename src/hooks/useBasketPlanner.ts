@@ -83,7 +83,7 @@ function reducer(state: PlannerState, action: Action): PlannerState {
     case "error":
       return { ...state, stage: "error", error: action.error, pendingMessage: action.pendingMessage ?? state.pendingMessage };
     case "clearError":
-      return { ...state, error: null };
+      return { ...state, stage: "idle", error: null };
     case "reset":
       return { ...createInitialState(), catalogMode: state.catalogMode };
     default:
@@ -128,6 +128,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
     const controller = new AbortController();
     const requestId = crypto.randomUUID();
     const startedAt = performance.now();
+    let failedStage: WorkflowStage = "analyzing";
     activeRequestIdRef.current = requestId;
     abortRef.current = controller;
     const isActive = () => activeRequestIdRef.current === requestId;
@@ -172,10 +173,12 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
         dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "assistant", content: intentResult.data.clarificationQuestion, createdAt: Date.now() } });
         return;
       }
+      failedStage = "searching";
       dispatch({ type: "stage", stage: "searching" });
       const catalog = await getCatalogForProfile(catalogRef, catalogProfileKeyRef, profile, retailers, controller.signal);
       if (!isActive()) return;
       dispatch({ type: "catalog", mode: catalog.mode });
+      failedStage = "composing";
       dispatch({ type: "stage", stage: "composing" });
       const fingerprint = buildCatalogFingerprint(intentResult.data, profile.address);
       const reusablePool = candidatePoolRef.current?.intentFingerprint === fingerprint ? candidatePoolRef.current.products : undefined;
@@ -203,14 +206,19 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
       console.info("pipeline_metrics", metrics);
     } catch (error) {
       if (!isActive()) return;
-      const appError = toAppError(error);
+      const appError = toAppError(error, failedStage);
       dispatch({ type: "error", error: appError, pendingMessage: message });
+    } finally {
+      if (isActive()) {
+        activeRequestIdRef.current = null;
+        abortRef.current = null;
+      }
     }
   }, [llm, profile, retailerKey, retailers, sessionId, state]);
 
   const submit = useCallback(async (message: string) => {
     const trimmed = message.trim();
-    if (!trimmed) return;
+    if (!trimmed || activeRequestIdRef.current) return;
     const validationError = state.intent ? null : validateBasketRequest(trimmed);
     if (validationError) {
       dispatch({ type: "error", error: { source: "validation", code: "short_prompt", message: validationError, recoverable: true }, pendingMessage: trimmed });
@@ -296,8 +304,9 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
+    abortRef.current = null;
     activeRequestIdRef.current = null;
-    dispatch({ type: "stage", stage: "idle" });
+    dispatch({ type: "stage", stage: "canceled" });
   }, []);
 
   const reset = useCallback(() => {
@@ -308,6 +317,8 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
     sessionStorage.removeItem(RESULTS_STORAGE_KEY);
     dispatch({ type: "reset" });
   }, []);
+
+  const editRequest = useCallback(() => dispatch({ type: "clearError" }), []);
 
   const replaceItem = useCallback((variantId: string, xmlId: string) => {
     const variant = state.variants.find((item) => item.id === variantId);
@@ -324,6 +335,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
     mockResults,
     createCart,
     cancel,
+    editRequest,
     reset,
     replaceItem,
     selectVariant: (id: string) => dispatch({ type: "select", id }),
@@ -435,11 +447,32 @@ function recalculate(variant: BasketVariant): BasketVariant {
   return { ...variant, totalRub, uniqueItemsCount: variant.items.length };
 }
 
-function toAppError(error: unknown): AppError {
-  if (error instanceof LlmProviderError) {
-    return { source: "llm", code: error.code, message: error.message, recoverable: true };
+function toAppError(error: unknown, stage: WorkflowStage): AppError {
+  const detail = error instanceof Error ? error.message : "";
+  if (stage === "searching") {
+    const retailerUnavailable = /retailer|магазин/i.test(detail);
+    return {
+      source: "mcp",
+      code: retailerUnavailable ? "retailer_unavailable" : "catalog_unavailable",
+      message: retailerUnavailable ? "Магазин временно недоступен." : "Каталог временно недоступен.",
+      recoverable: true,
+    };
   }
-  return { source: "application", code: "unknown", message: error instanceof Error ? error.message : "Что-то пошло не так.", recoverable: true };
+  if (stage === "composing") {
+    const insufficient = /достаточно.*товар|товар.*недостаточно|candidate/i.test(detail);
+    return {
+      source: "application",
+      code: insufficient ? "insufficient_products" : "generation",
+      message: insufficient ? "Не нашли достаточно товаров." : "Не удалось собрать варианты.",
+      recoverable: true,
+    };
+  }
+  return {
+    source: error instanceof LlmProviderError ? "llm" : "application",
+    code: "intent",
+    message: "Не удалось понять запрос. Измените формулировку.",
+    recoverable: true,
+  };
 }
 
 const mockIntent: BasketIntent = {

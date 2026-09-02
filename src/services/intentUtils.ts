@@ -20,21 +20,30 @@ export function normalizeBasketIntent(intent: BasketIntent): BasketIntent {
 
 export function applyFastIntentPatch(message: string, intent: BasketIntent): BasketIntent | null {
   const value = message.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ");
+  const resolve = (patch: Partial<BasketIntent>): BasketIntent => ({
+    ...intent,
+    ...patch,
+    needsClarification: false,
+    clarificationQuestion: null,
+  });
 
-  if (/^(сделай )?(дешевле|подешевле|бюджетнее)\.?$/.test(value)) return { ...intent, priority: "budget" };
+  if (/^(сделай )?(дешевле|подешевле|бюджетнее)\.?$/.test(value)) return resolve({ priority: "budget" });
 
   if (/(меньше готовить|почти без готовки|максимально быстро)/.test(value)) {
-    return { ...intent, priority: "speed", maxCookingMinutes: Math.min(intent.maxCookingMinutes ?? 15, 15) };
+    return resolve({ priority: "speed", maxCookingMinutes: Math.min(intent.maxCookingMinutes ?? 15, 15) });
   }
 
   const minutesMatch = value.match(/(?:до|максимум|не больше)\s+(\d+)\s*(?:мин|минут)/);
-  if (minutesMatch) return { ...intent, maxCookingMinutes: clampInteger(Number(minutesMatch[1]), 0, 360) };
+  if (minutesMatch) return resolve({ maxCookingMinutes: clampInteger(Number(minutesMatch[1]), 0, 360) });
 
   const peopleMatch = value.match(/(?:на|для)\s+(\d+)\s+(?:человек|человека|людей)/);
-  if (peopleMatch) return { ...intent, people: clampInteger(Number(peopleMatch[1]), 1, 20) };
+  if (peopleMatch) return resolve({ people: clampInteger(Number(peopleMatch[1]), 1, 20) });
 
   const daysMatch = value.match(/(?:на)\s+(\d+)\s+(?:день|дня|дней)/);
-  if (daysMatch) return { ...intent, days: clampInteger(Number(daysMatch[1]), 1, 31) };
+  if (daysMatch) return resolve({ days: clampInteger(Number(daysMatch[1]), 1, 31) });
+
+  const budgetMatch = value.match(/(?:до|бюджет(?:ом)?)\s+(\d[\d\s]*)\s*(?:₽|руб)/);
+  if (budgetMatch) return resolve({ budgetRub: clampInteger(Number(budgetMatch[1].replace(/\s/g, "")), 1, 1_000_000), budgetIsHard: true });
 
   return null;
 }

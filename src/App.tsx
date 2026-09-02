@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppShell, BasketResults, BasketResultsSkeleton, ConversationPanel, EmptyResultsState } from "./components";
+import { AppShell, BasketResults, BasketResultsSkeleton, ConversationPanel } from "./components";
 import { FullscreenLoader } from "./components/loader/FullscreenLoader";
 import { useLoaderVisualState } from "./components/loader/useLoaderVisualState";
 import { OnboardingFlow } from "./components/onboarding/OnboardingFlow";
@@ -59,18 +59,17 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (loading && route !== "results") {
-      window.history.pushState(null, "", resultsPath);
-      setRoute("results");
-    }
-  }, [loading, route]);
-
-  useEffect(() => {
     if (planner.state.stage === "ready" && hasResults && route !== "results") {
       window.history.pushState(null, "", resultsPath);
       setRoute("results");
     }
   }, [hasResults, planner.state.stage, route]);
+
+  useEffect(() => {
+    if (route !== "results" || hasResults || debugResults) return;
+    window.history.replaceState(null, "", "/");
+    setRoute("home");
+  }, [debugResults, hasResults, route]);
 
   useEffect(() => {
     if (route === "results" && !hasResults && !loading && debugResults) {
@@ -96,8 +95,8 @@ export function App() {
   return (
     <>
       <div ref={appContentRef} aria-hidden={addressGateVisible || undefined}>
-        <AppShell route={route} authProfile={authProfile} onOpenAddress={() => setAddressFlowOpen(true)}>
-          {route === "results" ? (
+        <AppShell route={route === "results" && (hasResults || debugResults) ? "results" : "home"} authProfile={authProfile} onOpenAddress={() => setAddressFlowOpen(true)}>
+          {route === "results" && (hasResults || debugResults) ? (
             hasResults ? (
               <BasketResults
                 planner={planner}
@@ -125,10 +124,8 @@ export function App() {
                   trackProductEvent("first_checkout_clicked", { retailer });
                 }}
               />
-            ) : loading || debugResults ? (
-              <BasketResultsSkeleton stage={planner.state.stage} />
             ) : (
-              <EmptyResultsState onStart={openHome} />
+              <BasketResultsSkeleton stage={planner.state.stage} />
             )
           ) : (
             <ConversationPanel

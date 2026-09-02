@@ -12,7 +12,8 @@ export type WorkflowStage =
   | "composing"
   | "ready"
   | "creatingCart"
-  | "error";
+  | "error"
+  | "canceled";
 
 export type ProductSort = "popularity" | "rating" | "price_asc" | "price_desc";
 

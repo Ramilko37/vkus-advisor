@@ -35,6 +35,7 @@ const stageLabels: Record<WorkflowStage, string> = {
   ready: "Готово к выбору",
   creatingCart: "Готовим корзину",
   error: "Нужна правка",
+  canceled: "Отменено",
 };
 
 const roleLabels: Record<string, string> = {
@@ -601,24 +602,82 @@ export function ConversationPanel({ planner, hasDeliveryAddress, retailers = [],
     if (draft === undefined) setLocalText(next);
     onDraftChange?.(next);
   };
-  const showMessages = planner.state.messages.length > 1 || planner.state.stage === "clarifying" || planner.state.stage === "error";
+  const clarifying = planner.state.stage === "clarifying" && Boolean(planner.state.intent?.clarificationQuestion);
+  const showMessages = !clarifying && (planner.state.messages.length > 1 || planner.state.stage === "error");
   const busy = ["analyzing", "searching", "composing", "creatingCart"].includes(planner.state.stage);
   const submit = (value = text) => {
     void planner.submit(value);
     setText("");
   };
+  const editRequest = () => {
+    setText(planner.state.pendingMessage ?? "");
+    planner.editRequest();
+    window.requestAnimationFrame(() => document.getElementById("basket-request")?.focus());
+  };
+  const errorAction = planner.state.error?.code === "retailer_unavailable" && onNeedsDelivery
+    ? { label: "Выбрать другой магазин", run: () => onNeedsDelivery(planner.state.pendingMessage ?? text) }
+    : planner.state.error && ["intent", "generation", "insufficient_products", "short_prompt"].includes(planner.state.error.code)
+      ? { label: "Изменить запрос", run: editRequest }
+      : { label: "Повторить", run: planner.retry };
 
   return (
     <section className="conversation-panel kit-home" aria-label="Подбор корзины" data-od-id="conversation-panel">
       {showMessages && <MessageList messages={planner.state.messages} />}
-      <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} hasDeliveryAddress={hasDeliveryAddress} onNeedsDelivery={onNeedsDelivery} />
-      <PromptExamples onPick={setText} />
+      {clarifying ? (
+        <ClarificationStep
+          question={planner.state.intent!.clarificationQuestion!}
+          value={text}
+          onChange={setText}
+          onSubmit={submit}
+        />
+      ) : (
+        <>
+          <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} hasDeliveryAddress={hasDeliveryAddress} onNeedsDelivery={onNeedsDelivery} />
+          <PromptExamples onPick={setText} />
+        </>
+      )}
       <RetailerContext retailers={retailers} />
       <IntentChips intent={planner.state.intent} />
-      {planner.state.error && <ErrorNotice message={planner.state.error.message} onRetry={planner.retry} />}
+      {planner.state.error && <ErrorNotice message={planner.state.error.message} actionLabel={errorAction.label} onAction={errorAction.run} />}
       <CatalogStatus mode={planner.state.catalogMode} onReconnect={planner.reconnectCatalog} />
     </section>
   );
+}
+
+function ClarificationStep({ question, value, onChange, onSubmit }: { question: string; value: string; onChange: (value: string) => void; onSubmit: (value?: string) => void }) {
+  const quickAnswers = clarificationAnswers(question);
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (value.trim()) onSubmit(value.trim());
+  };
+
+  return (
+    <form className="clarification-step" onSubmit={handleSubmit}>
+      <p className="section-kicker">Уточним один момент</p>
+      <h1>{question}</h1>
+      {quickAnswers.length > 0 && (
+        <div className="clarification-answers" aria-label="Быстрые ответы">
+          {quickAnswers.map((answer) => (
+            <button key={answer.label} type="button" onClick={() => onSubmit(answer.value)}>{answer.label}</button>
+          ))}
+        </div>
+      )}
+      <label htmlFor="clarification-answer">Или ответьте своими словами</label>
+      <textarea id="clarification-answer" rows={2} value={value} onChange={(event) => onChange(event.target.value)} placeholder="Ваш ответ" />
+      <button className="primary-button" type="submit" disabled={!value.trim()}>Продолжить</button>
+    </form>
+  );
+}
+
+function clarificationAnswers(question: string) {
+  const normalized = question.toLocaleLowerCase("ru-RU");
+  if (/человек|сколько.*(персон|людей)/.test(normalized)) {
+    return [1, 2, 3, 4].map((people) => ({ label: people === 4 ? "4+" : String(people), value: `На ${people} человека` }));
+  }
+  if (/бюджет|сумм/.test(normalized)) {
+    return [1500, 3000, 5000].map((budget) => ({ label: `${budget.toLocaleString("ru-RU")} ₽`, value: `До ${budget} ₽` }));
+  }
+  return [];
 }
 
 function RetailerContext({ retailers }: { retailers: Retailer[] }) {
@@ -843,19 +902,6 @@ function RetailerEmptyState({ group }: { group?: { key: RetailerKey; result?: Re
       <p>{message}</p>
       {group?.result && <span>Кандидатов: {group.result.candidateCount}</span>}
     </div>
-  );
-}
-
-export function EmptyResultsState({ onStart }: { onStart: () => void }) {
-  return (
-    <section className="results-panel empty-results-panel" aria-label="Подборка не найдена" data-od-id="empty-results-panel">
-      <div className="empty-state liquid-glass">
-        <ShoppingBasket aria-hidden="true" />
-        <h2>Подборка не найдена</h2>
-        <p>Здесь появятся варианты корзины после запроса. Можно вернуться и собрать новую умную корзину.</p>
-        <button className="primary-button" type="button" onClick={onStart}>Собрать корзину</button>
-      </div>
-    </section>
   );
 }
 
@@ -1089,12 +1135,12 @@ function formatBasketList(items: BasketItem[]) {
   return items.map((item) => `${item.quantity} × ${item.name} — ${Math.round(item.priceRub * item.quantity)} ₽`).join("\n");
 }
 
-export function ErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
+export function ErrorNotice({ message, actionLabel, onAction }: { message: string; actionLabel: string; onAction: () => void }) {
   return (
     <div className="error-notice" aria-live="polite">
       <AlertTriangle size={18} />
       <span>{message}</span>
-      <button type="button" onClick={onRetry}><RefreshCw size={16} /> Повторить</button>
+      <button type="button" onClick={onAction}><RefreshCw size={16} /> {actionLabel}</button>
     </div>
   );
 }

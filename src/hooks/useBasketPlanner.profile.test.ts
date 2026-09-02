@@ -119,6 +119,54 @@ describe("useBasketPlanner profile", () => {
     expect(result.current.state.variants).toEqual([]);
   });
 
+  it("ignores a second submit while generation is active", async () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1" };
+    const resolveIntent: Array<(value: StructuredGenerationResult<BasketIntent>) => void> = [];
+    mocks.generateStructured.mockImplementation(<T,>(options: { stage: "intent" | "basket" }) => {
+      if (options.stage === "intent") {
+        return new Promise<StructuredGenerationResult<T>>((resolve) => {
+          resolveIntent.push(resolve as (value: StructuredGenerationResult<BasketIntent>) => void);
+        });
+      }
+      return Promise.reject(new Error("basket generation must not start after cancellation"));
+    });
+    const { result } = renderHook(() => useBasketPlanner(profile));
+
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = result.current.submit("ужины на 3 дня для двоих до 3000");
+      second = result.current.submit("продукты на неделю для троих");
+    });
+
+    expect(mocks.generateStructured).toHaveBeenCalledTimes(1);
+    act(() => result.current.cancel());
+    await act(async () => {
+      resolveIntent.forEach((resolve) => resolve({ model: "test-model", data: testIntent() }));
+      await Promise.all([first, second]);
+    });
+  });
+
+  it("moves an aborted workflow to canceled without surfacing an error", async () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1" };
+    let resolveIntent!: (value: StructuredGenerationResult<BasketIntent>) => void;
+    mocks.generateStructured.mockImplementation(<T,>() => new Promise<StructuredGenerationResult<T>>((resolve) => {
+      resolveIntent = resolve as (value: StructuredGenerationResult<BasketIntent>) => void;
+    }));
+    const { result } = renderHook(() => useBasketPlanner(profile));
+    let workflow!: Promise<void>;
+    act(() => { workflow = result.current.submit("ужины на 3 дня для двоих до 3000"); });
+
+    act(() => result.current.cancel());
+
+    expect(result.current.state.stage).toBe("canceled");
+    expect(result.current.state.error).toBeNull();
+    await act(async () => {
+      resolveIntent({ model: "test-model", data: testIntent() });
+      await workflow;
+    });
+  });
+
   it("clears the current basket and its persisted copy for a new search", async () => {
     const { result } = renderHook(() => useBasketPlanner(DEFAULT_PROFILE));
 
@@ -148,9 +196,10 @@ describe("useBasketPlanner profile", () => {
     expect(mocks.createCatalogClient).not.toHaveBeenCalled();
   });
 
-  it("starts the workflow without a selected Lenta store", async () => {
+  it("maps catalog failures to safe recoverable copy", async () => {
     const profile = { ...DEFAULT_PROFILE, address: "Москва, Вавилова 19" };
-    mocks.createCatalogClient.mockRejectedValue(new Error("catalog offline"));
+    mocks.generateStructured.mockResolvedValue({ model: "test-model", data: testIntent() });
+    mocks.createCatalogClient.mockRejectedValue(new Error("HTTP 503 upstream payload"));
     const { result } = renderHook(() => useBasketPlanner(profile));
 
     await act(async () => {
@@ -158,8 +207,12 @@ describe("useBasketPlanner profile", () => {
     });
 
     expect(result.current.state.stage).toBe("error");
-    expect(result.current.state.error).toEqual(expect.objectContaining({ code: "unknown" }));
-    expect(result.current.state.error?.message).not.toMatch(/магазин Ленты/i);
+    expect(result.current.state.error).toEqual(expect.objectContaining({
+      code: "catalog_unavailable",
+      message: "Каталог временно недоступен.",
+      recoverable: true,
+    }));
+    expect(result.current.state.error?.message).not.toMatch(/HTTP|503|payload/i);
   });
 
   it("recreates cached catalog client when delivery address changes", async () => {
