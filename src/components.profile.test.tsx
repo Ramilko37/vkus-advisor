@@ -212,12 +212,15 @@ describe("ProfileControl", () => {
 describe("Header", () => {
   afterEach(() => cleanup());
 
-  it("frames the home screen as a grocery delivery planner", () => {
-    render(<Header route="home" address="г Москва, ул Тверская, д 1" onOpenAddress={vi.fn()} />);
+  it("shows a compact actionable delivery address", () => {
+    const onOpenAddress = vi.fn();
+    render(<Header route="home" address="г Москва, ул Тверская, д 1" onOpenAddress={onOpenAddress} />);
 
-    expect(screen.getByText("AI-планировщик корзины")).toBeInTheDocument();
-    expect(screen.getByText("Доставка")).toBeInTheDocument();
-    expect(screen.getByText("Что купить сегодня?")).toBeInTheDocument();
+    expect(screen.getByText("Тверская, 1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Адрес доставки: г Москва, ул Тверская, д 1" }));
+    expect(onOpenAddress).toHaveBeenCalledOnce();
+    expect(screen.getByText("Изменить")).toBeInTheDocument();
+    expect(screen.queryByText("Что купить сегодня?")).not.toBeInTheDocument();
   });
 });
 
@@ -298,15 +301,17 @@ describe("ConversationPanel", () => {
     );
 
     fireEvent.change(screen.getByLabelText("Что собрать?"), { target: { value: "ужины на три дня" } });
-    fireEvent.click(screen.getByRole("button", { name: "Подобрать 3 корзины" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подобрать 3 варианта" }));
 
     expect(submit).toHaveBeenCalledWith("ужины на три дня");
   });
 
-  it("adds grocery category shortcuts to the request", () => {
+  it("fills the request from a task preset without submitting", () => {
+    const submit = vi.fn();
     render(
       <ConversationPanel
         hasDeliveryAddress
+        retailers={["lenta", "pyaterochka"]}
         planner={{
           state: {
             stage: "idle",
@@ -319,7 +324,7 @@ describe("ConversationPanel", () => {
             modelNames: [],
             pendingMessage: null,
           },
-          submit: vi.fn(),
+          submit,
           retry: vi.fn(),
           reconnectCatalog: vi.fn(),
           mockResults: vi.fn(),
@@ -333,9 +338,16 @@ describe("ConversationPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Овощи" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ужины на 3 дня" }));
 
-    expect(screen.getByLabelText("Что собрать?")).toHaveValue("овощи и зелень");
+    expect(screen.getByLabelText("Что собрать?")).toHaveValue("Ужины на 3 дня для двоих до 3000 ₽, без грибов");
+    expect(submit).not.toHaveBeenCalled();
+    expect(screen.getByText("Опишите задачу обычными словами.")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Например, ужины на 3 дня для двоих до 3000 ₽ без грибов")).toBeInTheDocument();
+    expect(screen.getByText("Лента")).toBeInTheDocument();
+    expect(screen.getByText("Пятёрочка")).toBeInTheDocument();
+    expect(screen.queryByText("ВкусВилл")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Овощи" })).not.toBeInTheDocument();
   });
 });
 

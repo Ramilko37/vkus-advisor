@@ -1,6 +1,6 @@
-import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Gift, Heart, Home, Loader2, MapPin, Menu, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Loader2, MapPin, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import type { BasketItem, BasketVariant, CheckoutResult, LentaStore, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
+import type { BasketItem, BasketVariant, CheckoutResult, LentaStore, Retailer, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
 import type { AuthStatus } from "./hooks/useAuthProfile";
 import { normalizeProfile } from "./services/profileRepository";
@@ -20,24 +20,10 @@ type AuthProfile = {
 };
 
 const examples = [
-  { title: "Ужины на 3 дня", meta: "2 человека · до 3000 ₽ · без грибов", prompt: "Ужины на 3 дня для двоих до 3000 ₽, без грибов" },
-  { title: "Белковая корзина", meta: "Рабочая неделя · для одного", prompt: "Белковая корзина на рабочую неделю для одного человека" },
-  { title: "Почти без готовки", meta: "На 4 дня · быстрые блюда", prompt: "Максимально простая еда на 4 дня, почти без готовки" },
-];
-
-const briefChips = [
-  { label: "3 дня", fragment: "на 3 дня" },
-  { label: "для двоих", fragment: "для двоих" },
-  { label: "до 3000 ₽", fragment: "до 3000 ₽" },
-  { label: "без грибов", fragment: "без грибов" },
-  { label: "быстро", fragment: "почти без готовки" },
-];
-
-const categoryShortcuts = [
-  { label: "Молочное", icon: "🥛", fragment: "молочные продукты" },
-  { label: "Мясо", icon: "🥩", fragment: "мясо и белок" },
-  { label: "Овощи", icon: "🥬", fragment: "овощи и зелень" },
-  { label: "Готовое", icon: "🍱", fragment: "готовая еда" },
+  { title: "Ужины на 3 дня", prompt: "Ужины на 3 дня для двоих до 3000 ₽, без грибов" },
+  { title: "Продукты на неделю", prompt: "Продукты на неделю для семьи" },
+  { title: "Максимально бюджетно", prompt: "Собрать продукты максимально бюджетно" },
+  { title: "Минимум готовки", prompt: "Продукты на несколько дней с минимумом готовки" },
 ];
 
 const stageLabels: Record<WorkflowStage, string> = {
@@ -95,7 +81,6 @@ export function AppShell({ children, route, authProfile, onOpenAddress }: { chil
       <div className="workspace">
         {children}
       </div>
-      <BottomNav route={route} />
     </main>
   );
 }
@@ -591,32 +576,24 @@ export function Header({ route, address, onOpenAddress }: { route: "home" | "res
   if (route === "results") return null;
 
   return (
-    <header className="header vv-preview-header" data-od-id="app-header">
-      <div className="delivery-topbar">
-        <button className="icon-button topbar-button" type="button" aria-label="Поиск"><Search size={20} /></button>
-        <button className="delivery-location" type="button" onClick={onOpenAddress} aria-label={`Адрес доставки: ${address}`}>
-          <span>Доставка</span>
-          <strong><MapPin size={14} /> {shortAddress(address)}</strong>
-        </button>
-        <span aria-hidden="true" />
-      </div>
-      <div className="hero-offer">
-        <div>
-          <p className="brand-kicker vv-kicker">AI-планировщик корзины</p>
-          <h1 className="vv-title">Что купить сегодня?</h1>
-          <p className="header-copy vv-copy">Опишите задачу, а мы соберём три корзины с понятной ценой и заменами.</p>
-        </div>
-        <span className="hero-basket" aria-hidden="true">🥬</span>
-      </div>
+    <header className="header task-header" data-od-id="app-header">
+      <button className="task-address" type="button" onClick={onOpenAddress} aria-label={`Адрес доставки: ${address}`}>
+        <span className="task-address__location"><MapPin size={18} aria-hidden="true" /><strong>{shortAddress(address)}</strong></span>
+        <span className="task-address__action">Изменить</span>
+      </button>
     </header>
   );
 }
 
 function shortAddress(address: string) {
-  return address.split(",").slice(0, 2).join(",").trim() || "Указать адрес";
+  const parts = address.split(",").map((part) => part.trim()).filter(Boolean);
+  const street = parts.find((part) => /^(ул|улица|пр-т|проспект|пер|переулок)(?:\s|$)/i.test(part));
+  const house = parts.find((part) => /^(д|дом)(?:\s|$)/i.test(part));
+  if (street) return [street.replace(/^(ул|улица|пр-т|проспект|пер|переулок)\s*/i, ""), house?.replace(/^(д|дом)\s*/i, "")].filter(Boolean).join(", ");
+  return parts.slice(-2).join(", ") || "Указать адрес";
 }
 
-export function ConversationPanel({ planner, hasDeliveryAddress, onNeedsDelivery, draft, onDraftChange }: { planner: Planner; hasDeliveryAddress: boolean; onNeedsDelivery?: (request: string) => void; draft?: string; onDraftChange?: (request: string) => void }) {
+export function ConversationPanel({ planner, hasDeliveryAddress, retailers = [], onNeedsDelivery, draft, onDraftChange }: { planner: Planner; hasDeliveryAddress: boolean; retailers?: Retailer[]; onNeedsDelivery?: (request: string) => void; draft?: string; onDraftChange?: (request: string) => void }) {
   const [localText, setLocalText] = useState("");
   const text = draft ?? localText;
   const setText = (value: string | ((current: string) => string)) => {
@@ -635,25 +612,23 @@ export function ConversationPanel({ planner, hasDeliveryAddress, onNeedsDelivery
     <section className="conversation-panel kit-home" aria-label="Подбор корзины" data-od-id="conversation-panel">
       {showMessages && <MessageList messages={planner.state.messages} />}
       <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} hasDeliveryAddress={hasDeliveryAddress} onNeedsDelivery={onNeedsDelivery} />
-      <CategoryShortcuts onPick={(fragment) => setText((current) => appendBriefFragment(current, fragment))} />
+      <PromptExamples onPick={setText} />
+      <RetailerContext retailers={retailers} />
       <IntentChips intent={planner.state.intent} />
       {planner.state.error && <ErrorNotice message={planner.state.error.message} onRetry={planner.retry} />}
       <CatalogStatus mode={planner.state.catalogMode} onReconnect={planner.reconnectCatalog} />
-      <PromptExamples onPick={setText} />
     </section>
   );
 }
 
-function CategoryShortcuts({ onPick }: { onPick: (fragment: string) => void }) {
+function RetailerContext({ retailers }: { retailers: Retailer[] }) {
+  const available = retailers.filter((retailer) => retailer !== "demo");
+  if (!available.length) return null;
   return (
-    <div className="category-shortcuts" aria-label="Категории">
-      {categoryShortcuts.map((category) => (
-        <button key={category.label} type="button" onClick={() => onPick(category.fragment)}>
-          <span aria-hidden="true">{category.icon}</span>
-          {category.label}
-        </button>
-      ))}
-    </div>
+    <section className="home-retailers" aria-labelledby="home-retailers-title">
+      <h2 id="home-retailers-title">Магазины рядом</h2>
+      <div>{available.map((retailer) => <span key={retailer}>{retailerLabels[retailer]}</span>)}</div>
+    </section>
   );
 }
 
@@ -699,19 +674,17 @@ export function IntentChips({ intent }: { intent: Planner["state"]["intent"] }) 
 
 export function PromptExamples({ onPick }: { onPick: (value: string) => void }) {
   return (
-    <div className="examples" aria-label="Готовые запросы">
+    <div className="examples" aria-label="Готовые задачи">
       {examples.map((example) => (
         <button key={example.prompt} type="button" onClick={() => onPick(example.prompt)}>
           <span>{example.title}</span>
-          <small>{example.meta}</small>
         </button>
       ))}
     </div>
   );
 }
 
-export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddress, onNeedsDelivery, chips = briefChips, placeholder = "Например: ужины для двоих, без грибов", hint, submitLabel }: { value: string; onChange: (value: string) => void; onSubmit: () => void; busy: boolean; hasDeliveryAddress: boolean; onNeedsDelivery?: (request: string) => void; chips?: Array<{ label: string; fragment: string }>; placeholder?: string; hint?: string; submitLabel?: string }) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddress, onNeedsDelivery }: { value: string; onChange: (value: string) => void; onSubmit: () => void; busy: boolean; hasDeliveryAddress: boolean; onNeedsDelivery?: (request: string) => void }) {
   const hasText = value.trim().length > 0;
   const canSubmit = hasText && !busy;
   const handleSubmit = (event: FormEvent) => {
@@ -727,49 +700,30 @@ export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddre
       else onNeedsDelivery?.(value.trim());
     }
   };
-  const addBriefChip = (fragment: string) => {
-    onChange(appendBriefFragment(value, fragment));
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  };
-
   return (
     <form className="composer vv-chat-composer liquid-glass" onSubmit={handleSubmit}>
       <div className="composer-head">
-        <label htmlFor="basket-request">Что собрать?</label>
-        <p id="basket-request-hint">{hint ?? (!hasDeliveryAddress ? "Введите запрос — адрес добавим на следующем шаге." : "Добавьте срок, людей, бюджет или ограничения.")}</p>
-      </div>
-      <div className="brief-chips" aria-label="Быстро добавить параметры">
-        {chips.map((chip) => (
-          <button key={chip.fragment} type="button" onClick={() => addBriefChip(chip.fragment)}>
-            {chip.label}
-          </button>
-        ))}
+        <h1>Что собрать?</h1>
+        <p id="basket-request-hint">{hasDeliveryAddress ? "Опишите задачу обычными словами." : "Введите запрос — адрес добавим на следующем шаге."}</p>
       </div>
       <div className="composer-input-shell">
+        <label className="sr-only" htmlFor="basket-request">Что собрать?</label>
         <textarea
           id="basket-request"
-          ref={textareaRef}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          rows={3}
+          placeholder="Например, ужины на 3 дня для двоих до 3000 ₽ без грибов"
+          rows={5}
           aria-describedby="basket-request-hint"
         />
-        <button type="submit" disabled={!canSubmit} aria-label={hasText ? (hasDeliveryAddress ? (submitLabel ?? "Подобрать 3 корзины") : "Продолжить") : "Введите задачу для подбора"} aria-keyshortcuts="Control+Enter Meta+Enter">
+        <button type="submit" disabled={!canSubmit} aria-keyshortcuts="Control+Enter Meta+Enter">
           {busy ? <Loader2 className="spin" size={18} /> : <ShoppingBasket size={18} />}
-          <span>{busy ? "Собираем..." : hasDeliveryAddress ? (submitLabel ?? "Подобрать 3 корзины") : "Продолжить"}</span>
+          <span>{busy ? "Собираем..." : hasDeliveryAddress ? "Подобрать 3 варианта" : "Продолжить"}</span>
         </button>
       </div>
     </form>
   );
-}
-
-function appendBriefFragment(value: string, fragment: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return fragment;
-  if (trimmed.toLocaleLowerCase("ru-RU").includes(fragment.toLocaleLowerCase("ru-RU"))) return value;
-  return `${trimmed}, ${fragment}`;
 }
 
 export function BasketResults({ planner, showResultsHint = false, showBasketEditHint = false, onDismissResultsHint, onDismissBasketEditHint, onVariantOpen, onBasketEdit, onCheckoutClick, onStartNewSearch }: { planner: Planner; showResultsHint?: boolean; showBasketEditHint?: boolean; onDismissResultsHint?: () => void; onDismissBasketEditHint?: () => void; onVariantOpen?: (retailer?: string) => void; onBasketEdit?: (retailer?: string) => void; onCheckoutClick?: (retailer?: string) => void; onStartNewSearch?: () => void }) {
@@ -1105,32 +1059,6 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onRepl
         onCreateCart={checkout}
       />
     </>
-  );
-}
-
-function BottomNav({ route }: { route: "home" | "results" }) {
-  return (
-    <nav className="bottom-nav" aria-label="Основная навигация">
-      <a aria-current={route === "home" ? "page" : undefined} href="/">
-        <Home size={18} />
-        <span>Главная</span>
-      </a>
-      <a aria-current={route === "results" ? "page" : undefined} href="/results">
-        <ShoppingBasket size={18} />
-        <span>Корзина</span>
-      </a>
-      <button className="bottom-fab" type="button" aria-label="Быстрый подбор">
-        <Gift size={22} />
-      </button>
-      <a href="/">
-        <Heart size={18} />
-        <span>Любимое</span>
-      </a>
-      <a href="/">
-        <Menu size={18} />
-        <span>Ещё</span>
-      </a>
-    </nav>
   );
 }
 

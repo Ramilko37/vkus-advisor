@@ -70,6 +70,12 @@ describe("App address-first entry", () => {
     expect(screen.queryByRole("dialog", { name: "Адрес доставки" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Что собрать?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Адрес доставки: г Москва, ул Тверская, д 1" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Что собрать?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Подобрать 3 варианта" })).toBeDisabled();
+    expect(screen.getByText("Лента")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Поиск" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Основная навигация" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Молочное")).not.toBeInTheDocument();
     expect(mocks.basketPlanner).toHaveBeenLastCalledWith(profile, ["lenta"]);
   });
 

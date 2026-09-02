@@ -134,6 +134,7 @@ export function App() {
             <ConversationPanel
               planner={planner}
               hasDeliveryAddress={Boolean(authProfile.profile.address.trim())}
+              retailers={resolvedRetailers}
               draft={onboarding.state.requestDraft}
               onDraftChange={onboarding.setRequestDraft}
               onNeedsDelivery={(request) => onboarding.open("delivery", request)}
