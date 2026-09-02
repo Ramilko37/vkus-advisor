@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { saveOnboardingState } from "./services/onboardingRepository";
 import { DEFAULT_PROFILE } from "./services/profileRepository";
 
 const mocks = vi.hoisted(() => ({
@@ -69,6 +70,32 @@ describe("App address-first entry", () => {
     expect(screen.queryByRole("dialog", { name: "Адрес доставки" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Что собрать?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Адрес доставки: г Москва, ул Тверская, д 1" })).toBeInTheDocument();
+  });
+
+  it("blocks Home while the authenticated profile is loading", () => {
+    mocks.authProfile.mockReturnValue({ ...mocks.authProfile(), authStatus: "loading" });
+
+    render(<App />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Загружаем адрес…");
+    expect(screen.queryByRole("textbox", { name: "Что собрать?" })).not.toBeInTheDocument();
+  });
+
+  it("does not reuse a partial-retailer resolution from a different address", () => {
+    saveOnboardingState({
+      version: 1,
+      status: "completed",
+      step: "profile",
+      requestDraft: "",
+      resolvedAddress: "г Москва, ул Старая, д 1",
+      resultsHintDismissed: false,
+      basketEditHintDismissed: false,
+    });
+    profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Новая, д 2" };
+
+    render(<App />);
+
+    expect(screen.getByRole("dialog", { name: "Адрес доставки" })).toBeInTheDocument();
   });
 
   it("enters Home only after retailer resolution finishes", async () => {

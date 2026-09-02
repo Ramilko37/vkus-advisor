@@ -120,4 +120,19 @@ describe("address-first flow", () => {
     expect(await screen.findByText("Доступ к геопозиции запрещён — введите адрес вручную.")).toBeInTheDocument();
     expect(screen.getByLabelText("Адрес")).toBeEnabled();
   });
+
+  it("ignores an obsolete resolution after the address changes", async () => {
+    const onProfileChange = vi.fn();
+    let finishResolution!: (value: unknown) => void;
+    mocks.resolveDeliveryContext.mockImplementation(() => new Promise((resolve) => { finishResolution = resolve; }));
+    render(<OnboardingFlow profile={DEFAULT_PROFILE} onProfileChange={onProfileChange} onComplete={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Старая 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Новая 2" } });
+    finishResolution({ status: "ready", address: "г Москва, ул Старая, д 1", retailers: ["lenta"], lentaStore: { id: "old" } });
+
+    await waitFor(() => expect(screen.getByLabelText("Адрес")).toHaveValue("Москва, Новая 2"));
+    expect(onProfileChange).not.toHaveBeenCalled();
+  });
 });

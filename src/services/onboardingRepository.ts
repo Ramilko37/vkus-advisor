@@ -30,6 +30,7 @@ export function loadOnboardingState(): OnboardingState {
       status: legacyRequestStep && value.status === "in_progress" ? "completed" : value.status as OnboardingStatus,
       step: legacyRequestStep ? "profile" : value.step as OnboardingStep,
       requestDraft: typeof value.requestDraft === "string" ? value.requestDraft : "",
+      ...(typeof value.resolvedAddress === "string" ? { resolvedAddress: value.resolvedAddress } : {}),
       ...(typeof value.completedAt === "string" ? { completedAt: value.completedAt } : {}),
       resultsHintDismissed: Boolean(value.resultsHintDismissed),
       basketEditHintDismissed: Boolean(value.basketEditHintDismissed),

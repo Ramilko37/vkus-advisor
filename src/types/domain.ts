@@ -42,6 +42,7 @@ export interface OnboardingState {
   status: OnboardingStatus;
   step: OnboardingStep;
   requestDraft: string;
+  resolvedAddress?: string;
   completedAt?: string;
   resultsHintDismissed: boolean;
   basketEditHintDismissed: boolean;

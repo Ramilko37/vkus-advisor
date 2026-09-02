@@ -30,7 +30,7 @@ export function useOnboarding({ ready }: { ready: boolean }) {
     back: () => update((current) => ({ ...current, step: previousStep[current.step] ?? "value" })),
     dismiss: () => update((current) => ({ ...current, status: "dismissed" })),
     setRequestDraft: (requestDraft: string) => update((current) => ({ ...current, requestDraft })),
-    complete: () => update((current) => ({ ...current, status: "completed", step: "profile", completedAt: new Date().toISOString() })),
+    complete: (resolvedAddress?: string) => update((current) => ({ ...current, status: "completed", step: "profile", completedAt: new Date().toISOString(), ...(resolvedAddress ? { resolvedAddress } : {}) })),
     dismissResultsHint: () => update((current) => ({ ...current, resultsHintDismissed: true })),
     dismissBasketEditHint: () => update((current) => ({ ...current, basketEditHintDismissed: true })),
   };

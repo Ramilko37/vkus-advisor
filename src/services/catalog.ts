@@ -105,12 +105,18 @@ export async function resolveDeliveryContext(address: string, signal?: AbortSign
   const stores = storesResult.status === "fulfilled" ? storesResult.value : [];
   const availability = availabilityResult.status === "fulfilled" ? availabilityResult.value : {};
   const lentaStore = stores[0];
+  const pyaterochkaAvailable = Boolean(availability.providers?.pyaterochka?.connected && availability.providers.pyaterochka.store === "resolved");
+  const lentaAvailable = Boolean(lentaStore && (availabilityResult.status === "rejected" || availability.providers?.lenta?.enabled));
+  const hasAddressBoundRetailer = lentaAvailable || pyaterochkaAvailable;
   const retailers: Retailer[] = [];
-  if (availability.providers?.vkusvill?.connected) retailers.push("vkusvill");
-  if (lentaStore && availability.providers?.lenta?.enabled) retailers.push("lenta");
-  if (availability.providers?.pyaterochka?.connected && availability.providers.pyaterochka.store === "resolved") retailers.push("pyaterochka");
+  if (hasAddressBoundRetailer && availability.providers?.vkusvill?.connected) retailers.push("vkusvill");
+  if (lentaAvailable) retailers.push("lenta");
+  if (pyaterochkaAvailable) retailers.push("pyaterochka");
 
-  if (!retailers.length) return { status: "no_retailers", address: normalizedAddress, retailers: [] };
+  if (!retailers.length) {
+    if (storesResult.status === "rejected" || availabilityResult.status === "rejected") throw new Error("Retailer resolution failed");
+    return { status: "no_retailers", address: normalizedAddress, retailers: [] };
+  }
   return { status: "ready", address: normalizedAddress, retailers, ...(lentaStore ? { lentaStore } : {}) };
 }
 

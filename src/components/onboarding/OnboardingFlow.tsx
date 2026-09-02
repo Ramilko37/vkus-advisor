@@ -30,16 +30,23 @@ export function OnboardingFlow({ profile, onProfileChange, onComplete, onCancel 
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
   const [geoStatus, setGeoStatus] = useState<"idle" | "loading" | "ready" | "empty" | "denied" | "unsupported" | "error">("idle");
   const dialogRef = useRef<HTMLDivElement>(null);
+  const resolutionRef = useRef<AbortController | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const selectedAddressRef = useRef("");
   const address = draft.address.trim();
   const validAddress = address.length >= 8 && /\d/.test(address);
 
   useEffect(() => {
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     window.requestAnimationFrame(() => document.getElementById("onboarding-title")?.focus({ preventScroll: true }));
     trackProductEvent("onboarding_shown", { step: "delivery" });
-    return () => { document.body.style.overflow = previousOverflow; };
+    return () => {
+      resolutionRef.current?.abort();
+      document.body.style.overflow = previousOverflow;
+      window.setTimeout(() => restoreFocusRef.current?.isConnected && restoreFocusRef.current.focus(), 0);
+    };
   }, []);
 
   useEffect(() => {
@@ -71,6 +78,8 @@ export function OnboardingFlow({ profile, onProfileChange, onComplete, onCancel 
   }, [address, draft.address]);
 
   const updateAddress = (value: string) => {
+    resolutionRef.current?.abort();
+    resolutionRef.current = null;
     setDraft((current) => ({
       ...current,
       address: value,
@@ -91,10 +100,14 @@ export function OnboardingFlow({ profile, onProfileChange, onComplete, onCancel 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!validAddress || status === "loading") return;
+    const controller = new AbortController();
+    resolutionRef.current?.abort();
+    resolutionRef.current = controller;
     setStatus("loading");
     trackProductEvent("onboarding_store_search_started");
     try {
-      const context = await resolveDeliveryContext(address);
+      const context = await resolveDeliveryContext(address, controller.signal);
+      if (controller.signal.aborted) return;
       if (context.status !== "ready") {
         setStatus(context.status);
         return;
@@ -107,10 +120,13 @@ export function OnboardingFlow({ profile, onProfileChange, onComplete, onCancel 
         lentaStoreAddress: context.lentaStore?.address,
       });
       await onProfileChange(next);
+      if (controller.signal.aborted) return;
       trackProductEvent("onboarding_address_entered", { has_lenta_store: Boolean(next.lentaStoreId), retailers: context.retailers });
       onComplete(next, context.retailers);
     } catch {
-      setStatus("error");
+      if (!controller.signal.aborted) setStatus("error");
+    } finally {
+      if (resolutionRef.current === controller) resolutionRef.current = null;
     }
   };
 
@@ -154,13 +170,38 @@ export function OnboardingFlow({ profile, onProfileChange, onComplete, onCancel 
       : (current <= 0 ? suggestions.length - 1 : current - 1));
   };
 
+  const cancel = () => {
+    resolutionRef.current?.abort();
+    onCancel?.();
+  };
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape" && onCancel) {
+      event.preventDefault();
+      cancel();
+      return;
+    }
+    if (event.key !== "Tab" || !dialogRef.current) return;
+    const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])'));
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
-    <div ref={dialogRef} className="onboarding" role="dialog" aria-modal="true" aria-label="Адрес доставки">
+    <div ref={dialogRef} className="onboarding" role="dialog" aria-modal="true" aria-label="Адрес доставки" onKeyDown={handleDialogKeyDown}>
       <div className="onboarding__frame onboarding__frame--address">
         {onCancel && (
           <header className="onboarding__header onboarding__header--address">
             <span className="onboarding__header-spacer" />
-            <button className="onboarding__icon-button" type="button" onClick={onCancel} aria-label="Закрыть изменение адреса"><X aria-hidden="true" /></button>
+            <button className="onboarding__icon-button" type="button" onClick={cancel} aria-label="Закрыть изменение адреса"><X aria-hidden="true" /></button>
           </header>
         )}
         <form className="onboarding__content onboarding__address-gate" onSubmit={submit}>

@@ -32,7 +32,10 @@ export function App() {
   const appContentRef = useRef<HTMLDivElement>(null);
   const loading = loadingStages.includes(planner.state.stage);
   const validAddress = authProfile.profile.address.trim().length >= 8 && /\d/.test(authProfile.profile.address);
-  const hasSavedContext = validAddress && (Boolean(authProfile.profile.lentaStoreId) || onboarding.state.status === "completed");
+  const hasSavedContext = validAddress && (Boolean(authProfile.profile.lentaStoreId) || (
+    onboarding.state.status === "completed"
+    && normalizeAddressKey(onboarding.state.resolvedAddress) === normalizeAddressKey(authProfile.profile.address)
+  ));
   const addressGateVisible = authProfile.authStatus !== "loading" && (!hasSavedContext || addressFlowOpen);
   const loaderVisual = useLoaderVisualState(planner.state.stage, hasResults);
   const debugResults = import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "results";
@@ -83,6 +86,10 @@ export function App() {
     if (addressGateVisible) appContentRef.current?.setAttribute("inert", "");
     else appContentRef.current?.removeAttribute("inert");
   }, [addressGateVisible]);
+
+  if (authProfile.authStatus === "loading") {
+    return <div className="address-bootstrap" role="status">Загружаем адрес…</div>;
+  }
 
   return (
     <>
@@ -148,7 +155,7 @@ export function App() {
             const previousContext = `${authProfile.profile.address}:${authProfile.profile.lentaStoreId || ""}`;
             const nextContext = `${nextProfile.address}:${nextProfile.lentaStoreId || ""}`;
             if (hasSavedContext && previousContext !== nextContext) planner.reset();
-            onboarding.complete();
+            onboarding.complete(nextProfile.address);
             setAddressFlowOpen(false);
           }}
           onCancel={hasSavedContext ? () => setAddressFlowOpen(false) : undefined}
@@ -156,4 +163,8 @@ export function App() {
       )}
     </>
   );
+}
+
+function normalizeAddressKey(address = "") {
+  return address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ");
 }

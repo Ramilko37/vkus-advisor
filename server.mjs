@@ -619,6 +619,7 @@ async function handleLentaStores(req, res) {
   const body = await readJson(req);
   const address = cleanText(stringValue(body.address));
   if (!address) return send(res, 400, { error: "Delivery address is required" });
+  if (!lentaEnabled) return send(res, 200, { stores: [] });
   const adapter = createConfiguredLentaAdapter();
   let stores = await adapter.listStores(address);
   if (!stores.length && process.env.DADATA_API_KEY) {

@@ -173,18 +173,42 @@ describe("resolveDeliveryContext", () => {
     });
   });
 
-  it("keeps available retailers when Lenta resolution fails", async () => {
+  it("keeps positively resolved retailers when Lenta resolution fails", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(ok({ suggestions: ["г Москва, ул Тверская, д 1"] }))
       .mockRejectedValueOnce(new Error("Lenta unavailable"))
-      .mockResolvedValueOnce(ok({ mode: "live", providers: { vkusvill: { connected: true }, lenta: { enabled: true }, pyaterochka: { connected: false } } }));
+      .mockResolvedValueOnce(ok({ mode: "live", providers: { vkusvill: { connected: true }, lenta: { enabled: true }, pyaterochka: { connected: true, store: "resolved" } } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(resolveDeliveryContext("Москва, Тверская 1")).resolves.toEqual({
       status: "ready",
       address: "г Москва, ул Тверская, д 1",
-      retailers: ["vkusvill"],
+      retailers: ["vkusvill", "pyaterochka"],
     });
+  });
+
+  it("does not treat VkusVill connectivity as address coverage", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ suggestions: ["г Тверь, ул Советская, д 1"] }))
+      .mockResolvedValueOnce(ok({ stores: [] }))
+      .mockResolvedValueOnce(ok({ mode: "live", providers: { vkusvill: { connected: true }, lenta: { enabled: true }, pyaterochka: { connected: false } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveDeliveryContext("Тверь, Советская 1")).resolves.toEqual({
+      status: "no_retailers",
+      address: "г Тверь, ул Советская, д 1",
+      retailers: [],
+    });
+  });
+
+  it("reports a transient error instead of definitive unavailability when resolution fails", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ suggestions: ["г Москва, ул Тверская, д 1"] }))
+      .mockRejectedValueOnce(new Error("Lenta unavailable"))
+      .mockRejectedValueOnce(new Error("Catalog unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveDeliveryContext("Москва, Тверская 1")).rejects.toThrow("Retailer resolution failed");
   });
 });
 

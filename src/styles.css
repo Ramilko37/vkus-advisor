@@ -61,6 +61,15 @@
   background: var(--background);
 }
 
+.address-bootstrap {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
 * {
   box-sizing: border-box;
 }
