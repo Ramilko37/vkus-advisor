@@ -607,7 +607,7 @@ describe("BasketResults", () => {
     expect(screen.queryByText("Творог ВкусВилл")).not.toBeInTheDocument();
   });
 
-  it("marks a retailer without baskets as unavailable", () => {
+  it("keeps a failed retailer out of tabs and shows its status", () => {
     render(
       <BasketResults
         planner={{
@@ -626,7 +626,7 @@ describe("BasketResults", () => {
             retailerResults: [
               { retailer: "vkusvill", status: "ready", candidateCount: 12, selectedCandidateCount: 12, variantCount: 3 },
               { retailer: "lenta", status: "ready", candidateCount: 12, selectedCandidateCount: 12, variantCount: 3 },
-              { retailer: "pyaterochka", status: "no_candidates", candidateCount: 0, selectedCandidateCount: 0, variantCount: 0 },
+              { retailer: "pyaterochka", status: "insufficient_candidates", candidateCount: 3, selectedCandidateCount: 3, variantCount: 0 },
             ],
             selectedId: null,
             error: null,
@@ -648,8 +648,8 @@ describe("BasketResults", () => {
       />,
     );
 
-    expect(screen.getByRole("tab", { name: /Пятёрочка.*Недоступно/ })).toBeDisabled();
-    expect(screen.getByText("Пятёрочка: сейчас недостаточно товаров для трёх вариантов")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Пятёрочка/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Недоступные магазины")).toHaveTextContent("Пятёрочка: сейчас недостаточно товаров для трёх вариантов");
   });
 
   it("shows retailer diagnostics for an empty retailer tab", () => {
@@ -691,7 +691,7 @@ describe("BasketResults", () => {
     );
 
     expect(screen.getByLabelText("Недоступные магазины")).toHaveTextContent("Не удалось собрать три валидные корзины.");
-    expect(screen.getByRole("tab", { name: /Лента.*Недоступно/ })).toBeDisabled();
+    expect(screen.queryByRole("tab", { name: /Лента/ })).not.toBeInTheDocument();
   });
 });
 

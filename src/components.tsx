@@ -791,7 +791,7 @@ export function BasketResults({ planner, deliveryAddress = "", showResultsHint =
   const variants = planner.state.variants;
   const retailerGroups = useMemo(() => groupBasketVariants(variants, planner.state.retailerResults), [planner.state.retailerResults, variants]);
   const availableGroups = retailerGroups.filter((group) => group.variants.length > 0);
-  const unavailableGroups = retailerGroups.filter((group) => group.variants.length === 0);
+  const unavailableGroups = retailerGroups.filter((group) => group.variants.length === 0 && (group.result?.candidateCount ?? 0) > 0);
   const activeGroup = availableGroups.find((group) => group.key === activeRetailer) ?? availableGroups[0];
   const activeVariants = activeGroup?.variants ?? variants;
   const storeAddress = activeVariants.flatMap((variant) => variant.items).find((item) => item.storeAddress)?.storeAddress ?? deliveryAddress;
@@ -861,20 +861,18 @@ export function BasketResults({ planner, deliveryAddress = "", showResultsHint =
         <strong>Готово. Мы собрали несколько способов решить вашу задачу.</strong> У вариантов разные приоритеты: цена, баланс состава и минимум готовки. Откройте любую корзину, чтобы посмотреть товары и изменить состав.
       </ContextHint>}
       {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
-      {retailerGroups.length > 1 && (
+      {availableGroups.length > 1 && (
         <div className="retailer-tabs" role="tablist" aria-label="Магазин">
-          {retailerGroups.map((group) => (
+          {availableGroups.map((group) => (
             <button
               key={group.key}
               type="button"
               role="tab"
               aria-selected={group.key === activeGroup?.key}
-              aria-disabled={group.variants.length === 0}
-              disabled={group.variants.length === 0}
               onClick={() => setActiveRetailer(group.key)}
             >
               {retailerLabels[group.key]}
-              <span>{group.variants.length || "Недоступно"}</span>
+              <span>{group.variants.length}</span>
             </button>
           ))}
         </div>
