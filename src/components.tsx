@@ -785,13 +785,16 @@ export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddre
   );
 }
 
-export function BasketResults({ planner, showResultsHint = false, showBasketEditHint = false, onDismissResultsHint, onDismissBasketEditHint, onVariantOpen, onBasketEdit, onCheckoutClick, onStartNewSearch }: { planner: Planner; showResultsHint?: boolean; showBasketEditHint?: boolean; onDismissResultsHint?: () => void; onDismissBasketEditHint?: () => void; onVariantOpen?: (retailer?: string) => void; onBasketEdit?: (retailer?: string) => void; onCheckoutClick?: (retailer?: string) => void; onStartNewSearch?: () => void }) {
+export function BasketResults({ planner, deliveryAddress = "", showResultsHint = false, showBasketEditHint = false, onDismissResultsHint, onDismissBasketEditHint, onVariantOpen, onBasketEdit, onCheckoutClick, onStartNewSearch, onEditRequest }: { planner: Planner; deliveryAddress?: string; showResultsHint?: boolean; showBasketEditHint?: boolean; onDismissResultsHint?: () => void; onDismissBasketEditHint?: () => void; onVariantOpen?: (retailer?: string) => void; onBasketEdit?: (retailer?: string) => void; onCheckoutClick?: (retailer?: string) => void; onStartNewSearch?: () => void; onEditRequest?: () => void }) {
   const [openedId, setOpenedId] = useState<string | null>(planner.state.selectedId);
   const [activeRetailer, setActiveRetailer] = useState<RetailerKey>(() => defaultRetailerKey(groupBasketVariants(planner.state.variants, planner.state.retailerResults)));
   const variants = planner.state.variants;
   const retailerGroups = useMemo(() => groupBasketVariants(variants, planner.state.retailerResults), [planner.state.retailerResults, variants]);
-  const activeGroup = retailerGroups.find((group) => group.key === activeRetailer) ?? retailerGroups[0];
+  const availableGroups = retailerGroups.filter((group) => group.variants.length > 0);
+  const unavailableGroups = retailerGroups.filter((group) => group.variants.length === 0);
+  const activeGroup = availableGroups.find((group) => group.key === activeRetailer) ?? availableGroups[0];
   const activeVariants = activeGroup?.variants ?? variants;
+  const storeAddress = activeVariants.flatMap((variant) => variant.items).find((item) => item.storeAddress)?.storeAddress ?? deliveryAddress;
   const selected = planner.state.variants.find((variant) => variant.id === openedId) ?? null;
   const openVariant = (id: string) => {
     const variant = planner.state.variants.find((item) => item.id === id);
@@ -806,10 +809,10 @@ export function BasketResults({ planner, showResultsHint = false, showBasketEdit
   }, [openedId, planner.state.selectedId]);
 
   useEffect(() => {
-    if (retailerGroups.length > 0 && !retailerGroups.some((group) => group.key === activeRetailer)) {
-      setActiveRetailer(retailerGroups[0].key);
+    if (availableGroups.length > 0 && !availableGroups.some((group) => group.key === activeRetailer)) {
+      setActiveRetailer(availableGroups[0].key);
     }
-  }, [activeRetailer, retailerGroups]);
+  }, [activeRetailer, availableGroups]);
 
   if (selected) {
     return (
@@ -841,14 +844,18 @@ export function BasketResults({ planner, showResultsHint = false, showBasketEdit
 
   return (
     <section className="results-panel kit-results" aria-label="Варианты корзины" data-od-id="results-panel">
-      <header className="section-heading compact-heading">
-        <div>
-          <a className="section-kicker results-home-link" href="/" aria-label="На главную" onClick={onStartNewSearch ? (event) => { event.preventDefault(); onStartNewSearch(); } : undefined}>
-            <ChevronLeft size={16} aria-hidden="true" />
-            На главную
-          </a>
-          <h2>3 сценария доставки</h2>
+      <header className="compare-header">
+        <a className="section-kicker results-home-link" href="/" aria-label="На главную" onClick={onStartNewSearch ? (event) => { event.preventDefault(); onStartNewSearch(); } : undefined}>
+          <ChevronLeft size={16} aria-hidden="true" />
+          На главную
+        </a>
+        <div className="compare-request">
+          <p className="section-kicker">Ваш запрос</p>
+          <h1>{planner.state.intent?.originalRequest ?? "Три варианта корзины"}</h1>
+          {planner.state.intent && <p className="compare-request-summary">{summarizeIntentSlots(planner.state.intent).join(" · ")}</p>}
+          {activeGroup && <p className="compare-store-context"><MapPin size={16} aria-hidden="true" /> {retailerLabels[activeGroup.key]}{storeAddress ? ` · ${storeAddress}` : ""}</p>}
         </div>
+        {onEditRequest && <button className="secondary-button compare-edit-request" type="button" onClick={onEditRequest}>Изменить запрос</button>}
       </header>
       {showResultsHint && <ContextHint onDismiss={onDismissResultsHint}>
         <strong>Готово. Мы собрали несколько способов решить вашу задачу.</strong> У вариантов разные приоритеты: цена, баланс состава и минимум готовки. Откройте любую корзину, чтобы посмотреть товары и изменить состав.
@@ -862,12 +869,19 @@ export function BasketResults({ planner, showResultsHint = false, showBasketEdit
               type="button"
               role="tab"
               aria-selected={group.key === activeGroup?.key}
+              aria-disabled={group.variants.length === 0}
+              disabled={group.variants.length === 0}
               onClick={() => setActiveRetailer(group.key)}
             >
               {retailerLabels[group.key]}
-              <span>{group.variants.length}</span>
+              <span>{group.variants.length || "Недоступно"}</span>
             </button>
           ))}
+        </div>
+      )}
+      {unavailableGroups.length > 0 && (
+        <div className="retailer-unavailable-list" aria-label="Недоступные магазины">
+          {unavailableGroups.map((group) => <p key={group.key}>{retailerLabels[group.key]}: {group.result?.message ?? "сейчас недостаточно товаров для трёх вариантов"}</p>)}
         </div>
       )}
       <div className="variant-list compare-list" data-od-id="variant-grid">
@@ -946,7 +960,7 @@ function groupBasketVariants(variants: BasketVariant[], retailerResults: Retaile
   return order.flatMap((key) => {
     const group = grouped.get(key);
     const result = resultMap.get(key);
-    return group || result || key !== "demo" ? [{ key, variants: group ?? [], result }] : [];
+    return group || result ? [{ key, variants: group ?? [], result }] : [];
   });
 }
 
@@ -956,10 +970,11 @@ function defaultRetailerKey(groups: Array<{ key: RetailerKey; variants: BasketVa
 
 export function BasketVariantCard({ variant, onSelect }: { variant: BasketVariant; onSelect: () => void }) {
   const presentation = getVariantPresentation(variant);
+  const selectionLabel = variant.strategy === "economy" ? "Выбрать экономную" : variant.strategy === "fast" ? "Выбрать быструю" : "Выбрать сбалансированную";
 
   return (
     <article className="variant-card vv-basket-variant-card" data-od-id={`variant-card-${variant.id}`}>
-      <button className="variant-card-button" type="button" onClick={onSelect} aria-label={`Открыть корзину ${variant.title}`}>
+      <button className="variant-card-button" type="button" onClick={onSelect} aria-label={selectionLabel}>
         <div className="variant-card-top">
           <div>
             <h2>{presentation.title}</h2>
@@ -973,11 +988,11 @@ export function BasketVariantCard({ variant, onSelect }: { variant: BasketVarian
           <span>{presentation.cookingLabel}</span>
           <span>{presentation.priceDeltaLabel}</span>
         </div>
-        <ul className="variant-preview-list" aria-label="В составе">
+        <p className="variant-difference">{presentation.tradeoffText}</p>
+        <ul className="variant-preview-list" aria-label="Примеры товаров">
           {presentation.previewItems.map((name) => <li key={name}>{name}</li>)}
         </ul>
-        <p className="variant-difference">{presentation.tradeoffText}</p>
-        <span className="variant-card-action">Открыть</span>
+        <span className="variant-card-action">{selectionLabel}</span>
       </button>
     </article>
   );

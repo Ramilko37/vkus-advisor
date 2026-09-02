@@ -430,7 +430,64 @@ describe("ConversationPanel", () => {
 });
 
 describe("BasketResults", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the request context and explicit strategy choices", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    vi.stubGlobal("scrollTo", vi.fn());
+    const onEditRequest = vi.fn();
+    const selectVariant = vi.fn();
+    const intent: BasketIntent = {
+      originalRequest: "Ужины на 3 дня для двоих до 3000 ₽, без грибов",
+      people: 2,
+      days: 3,
+      meals: ["ужин"],
+      budgetRub: 3000,
+      budgetIsHard: true,
+      maxCookingMinutes: null,
+      excludedIngredients: ["грибов"],
+      dietaryRestrictions: [],
+      preferences: [],
+      readyFoodAllowed: true,
+      priority: "balanced",
+      needsClarification: false,
+      clarificationQuestion: null,
+      assumptions: [],
+      searchQueries: [{ query: "ужин", purpose: "ужин", sort: "popularity" }],
+    };
+    const variants = [
+      makeVariant("vkusvill", "balanced", "Творог ВкусВилл"),
+      makeVariant("vkusvill", "economy", "Кефир ВкусВилл"),
+      makeVariant("vkusvill", "fast", "Салат ВкусВилл"),
+    ];
+
+    render(
+      <BasketResults
+        planner={{
+          state: { stage: "ready", messages: [], intent, variants, retailerResults: [], selectedId: null, error: null, catalogMode: "live", modelNames: [], pendingMessage: null },
+          submit: vi.fn(), retry: vi.fn(), editRequest: vi.fn(), reconnectCatalog: vi.fn(), mockResults: vi.fn(), createCart: vi.fn(), cancel: vi.fn(), reset: vi.fn(), replaceItem: vi.fn(), selectVariant, clearVariantSelection: vi.fn(), updateItems: vi.fn(),
+        } as never}
+        deliveryAddress="г Москва, ул Тверская, д 7"
+        onEditRequest={onEditRequest}
+      />,
+    );
+
+    expect(screen.getByText("Ваш запрос")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: intent.originalRequest })).toBeInTheDocument();
+    expect(screen.getByText(/ВкусВилл · .*Тверская.*7/)).toBeInTheDocument();
+    expect(screen.getAllByText("3 ужина · 2 человека")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Выбрать сбалансированную" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Выбрать экономную" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Выбрать быструю" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить запрос" }));
+    expect(onEditRequest).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать экономную" }));
+    expect(selectVariant).toHaveBeenCalledWith("vkusvill:economy");
+  });
 
   it("provides a header link back to the home screen", () => {
     render(
@@ -550,7 +607,7 @@ describe("BasketResults", () => {
     expect(screen.queryByText("Творог ВкусВилл")).not.toBeInTheDocument();
   });
 
-  it("keeps all retailer tabs visible when one provider has no baskets", () => {
+  it("marks a retailer without baskets as unavailable", () => {
     render(
       <BasketResults
         planner={{
@@ -565,6 +622,11 @@ describe("BasketResults", () => {
               makeVariant("lenta", "balanced", "Молоко Лента"),
               makeVariant("lenta", "economy", "Гречка Лента"),
               makeVariant("lenta", "fast", "Курица Лента"),
+            ],
+            retailerResults: [
+              { retailer: "vkusvill", status: "ready", candidateCount: 12, selectedCandidateCount: 12, variantCount: 3 },
+              { retailer: "lenta", status: "ready", candidateCount: 12, selectedCandidateCount: 12, variantCount: 3 },
+              { retailer: "pyaterochka", status: "no_candidates", candidateCount: 0, selectedCandidateCount: 0, variantCount: 0 },
             ],
             selectedId: null,
             error: null,
@@ -586,10 +648,8 @@ describe("BasketResults", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: /Пятёрочка/ }));
-
-    expect(screen.getByRole("tab", { name: /Пятёрочка/ })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Пока нет корзин для Пятёрочка")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Пятёрочка.*Недоступно/ })).toBeDisabled();
+    expect(screen.getByText("Пятёрочка: сейчас недостаточно товаров для трёх вариантов")).toBeInTheDocument();
   });
 
   it("shows retailer diagnostics for an empty retailer tab", () => {
@@ -630,10 +690,8 @@ describe("BasketResults", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: /Лента/ }));
-
-    expect(screen.getByText("Не удалось собрать три валидные корзины.")).toBeInTheDocument();
-    expect(screen.getByText("Кандидатов: 16")).toBeInTheDocument();
+    expect(screen.getByLabelText("Недоступные магазины")).toHaveTextContent("Не удалось собрать три валидные корзины.");
+    expect(screen.getByRole("tab", { name: /Лента.*Недоступно/ })).toBeDisabled();
   });
 });
 

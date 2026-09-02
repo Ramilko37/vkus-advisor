@@ -100,12 +100,18 @@ export function App() {
             hasResults ? (
               <BasketResults
                 planner={planner}
+                deliveryAddress={authProfile.profile.address}
                 showResultsHint={onboarding.showResultsHint}
                 showBasketEditHint={onboarding.showBasketEditHint}
                 onDismissResultsHint={onboarding.dismissResultsHint}
                 onDismissBasketEditHint={onboarding.dismissBasketEditHint}
                 onStartNewSearch={() => {
                   planner.reset();
+                  openHome();
+                }}
+                onEditRequest={() => {
+                  onboarding.setRequestDraft(planner.state.intent?.originalRequest ?? "");
+                  planner.editRequest();
                   openHome();
                 }}
                 onVariantOpen={(retailer) => {
