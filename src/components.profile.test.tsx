@@ -10,6 +10,28 @@ describe("ProfileControl", () => {
     vi.unstubAllGlobals();
   });
 
+  it("delegates address changes to the shared address flow", () => {
+    const onOpenAddress = vi.fn();
+    render(
+      <ProfileControl
+        profile={{ ...DEFAULT_PROFILE, address: "г Москва, ул Тверская, д 1", lentaStoreId: "525" }}
+        authConfigured={false}
+        authStatus="guest"
+        authError={null}
+        onChange={vi.fn()}
+        onSendOtp={vi.fn()}
+        onSignOut={vi.fn()}
+        onOpenAddress={onOpenAddress}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Открыть профиль" }));
+    expect(screen.queryByLabelText("Адрес")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Изменить адрес" }));
+
+    expect(onOpenAddress).toHaveBeenCalledOnce();
+  });
+
   it("keeps the profile focused on auth, address, household and stable tags", () => {
     const onChange = vi.fn();
     render(
@@ -24,7 +46,7 @@ describe("ProfileControl", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть профиль" }));
 
     expect(screen.getByRole("dialog", { name: "Профиль" })).toBeInTheDocument();
     expect(screen.getByText("Настройки, которые будем учитывать в следующих подборках.")).toBeInTheDocument();
@@ -56,7 +78,7 @@ describe("ProfileControl", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Адрес: Москва, Тверская 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть профиль" }));
     fireEvent.click(screen.getByRole("button", { name: "Увеличить количество людей" }));
     fireEvent.click(screen.getByRole("button", { name: "Добавить ограничение" }));
     fireEvent.change(screen.getByLabelText("Новое ограничение"), { target: { value: " грибы " } });
@@ -98,7 +120,7 @@ describe("ProfileControl", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть профиль" }));
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Тверская 1" } });
 
     expect(screen.getByRole("button", { name: "Сохранить изменения" })).toBeEnabled();
@@ -131,7 +153,7 @@ describe("ProfileControl", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть профиль" }));
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Вавилова 19" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
 
@@ -158,7 +180,7 @@ describe("ProfileControl", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть профиль" }));
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва Твер" } });
     fireEvent.click(await screen.findByRole("option", { name: "г Москва, ул Тверская, д 1" }));
 
@@ -179,7 +201,7 @@ describe("ProfileControl", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Добавить адрес" }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть профиль" }));
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: " USER@EXAMPLE.COM " } });
     fireEvent.click(screen.getByRole("button", { name: "Войти по email" }));
 
@@ -191,7 +213,7 @@ describe("Header", () => {
   afterEach(() => cleanup());
 
   it("frames the home screen as a grocery delivery planner", () => {
-    render(<Header route="home" />);
+    render(<Header route="home" address="г Москва, ул Тверская, д 1" onOpenAddress={vi.fn()} />);
 
     expect(screen.getByText("AI-планировщик корзины")).toBeInTheDocument();
     expect(screen.getByText("Доставка")).toBeInTheDocument();

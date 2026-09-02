@@ -1,4 +1,4 @@
-import type { BasketValidationResult, CatalogClient, LentaStore, NormalizedProduct, SearchQuery, UserProfile } from "../types/domain";
+import type { BasketValidationResult, CatalogClient, LentaStore, NormalizedProduct, Retailer, SearchQuery, UserProfile } from "../types/domain";
 import { logCatalogProductsSummary, recordLentaCatalogProducts } from "./catalogDebug";
 import { DEFAULT_PROFILE } from "./profileRepository";
 
@@ -87,6 +87,39 @@ export async function reverseGeocodeAddress(lat: number, lon: number, signal?: A
     signal,
   });
   return response.suggestions;
+}
+
+export type DeliveryContextResult =
+  | { status: "address_not_found" }
+  | { status: "no_retailers"; address: string; retailers: [] }
+  | { status: "ready"; address: string; retailers: Retailer[]; lentaStore?: LentaStore };
+
+export async function resolveDeliveryContext(address: string, signal?: AbortSignal): Promise<DeliveryContextResult> {
+  const [normalizedAddress] = await suggestAddresses(address, signal);
+  if (!normalizedAddress) return { status: "address_not_found" };
+
+  const [storesResult, availabilityResult] = await Promise.allSettled([
+    findLentaStores(normalizedAddress, signal),
+    fetchJson<CatalogAvailability>(`/api/catalog/status?address=${encodeURIComponent(normalizedAddress)}`, { method: "GET", signal }),
+  ]);
+  const stores = storesResult.status === "fulfilled" ? storesResult.value : [];
+  const availability = availabilityResult.status === "fulfilled" ? availabilityResult.value : {};
+  const lentaStore = stores[0];
+  const retailers: Retailer[] = [];
+  if (availability.providers?.vkusvill?.connected) retailers.push("vkusvill");
+  if (lentaStore && availability.providers?.lenta?.enabled) retailers.push("lenta");
+  if (availability.providers?.pyaterochka?.connected && availability.providers.pyaterochka.store === "resolved") retailers.push("pyaterochka");
+
+  if (!retailers.length) return { status: "no_retailers", address: normalizedAddress, retailers: [] };
+  return { status: "ready", address: normalizedAddress, retailers, ...(lentaStore ? { lentaStore } : {}) };
+}
+
+interface CatalogAvailability {
+  providers?: {
+    vkusvill?: { connected?: boolean };
+    lenta?: { enabled?: boolean };
+    pyaterochka?: { connected?: boolean; store?: string };
+  };
 }
 
 function lentaStorePayload(profile: UserProfile) {

@@ -1,33 +1,41 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { saveOnboardingState } from "./services/onboardingRepository";
 import { DEFAULT_PROFILE } from "./services/profileRepository";
 
 const mocks = vi.hoisted(() => ({
   authProfile: vi.fn(),
   basketPlanner: vi.fn(),
-  findLentaStores: vi.fn(),
+  resolveDeliveryContext: vi.fn(),
   submit: vi.fn(),
   updateProfile: vi.fn(),
+  reset: vi.fn(),
 }));
 
 vi.mock("./hooks/useAuthProfile", () => ({ useAuthProfile: mocks.authProfile }));
 vi.mock("./hooks/useBasketPlanner", () => ({ useBasketPlanner: mocks.basketPlanner }));
 vi.mock("./services/catalog", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./services/catalog")>()),
-  findLentaStores: mocks.findLentaStores,
+  resolveDeliveryContext: mocks.resolveDeliveryContext,
 }));
 vi.mock("./services/webMcpTools", () => ({ registerWebMcpTools: vi.fn() }));
 
-describe("App first-run onboarding", () => {
+describe("App address-first entry", () => {
+  let profile = DEFAULT_PROFILE;
+
   beforeEach(() => {
     window.localStorage.clear();
     window.history.replaceState(null, "", "/");
+    profile = DEFAULT_PROFILE;
     mocks.submit.mockReset();
     mocks.updateProfile.mockReset();
-    mocks.findLentaStores.mockResolvedValue([]);
-    let profile = DEFAULT_PROFILE;
+    mocks.reset.mockReset();
+    mocks.resolveDeliveryContext.mockResolvedValue({
+      status: "ready",
+      address: "г Москва, ул Тверская, д 1",
+      retailers: ["vkusvill", "lenta"],
+      lentaStore: { id: "525", name: "Лента", address: "Москва, Овчинниковская наб., 22/24с1" },
+    });
     mocks.authProfile.mockImplementation(() => ({
       authConfigured: false,
       authError: null,
@@ -46,81 +54,52 @@ describe("App first-run onboarding", () => {
 
   afterEach(() => cleanup());
 
-  it("shows onboarding on the first visit and does not open it automatically again", () => {
-    const firstVisit = render(<App />);
+  it("blocks Home with the address gate on first launch", () => {
+    render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Соберём покупки вместо вас" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Пропустить настройку" }));
+    expect(screen.getByRole("heading", { name: "Куда доставить продукты?" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Что собрать?" })).not.toBeInTheDocument();
+  });
 
+  it("skips the gate when a valid saved address and store context exist", () => {
+    profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Тверская, д 1", lentaStoreId: "525", lentaStoreName: "Лента" };
+
+    render(<App />);
+
+    expect(screen.queryByRole("dialog", { name: "Адрес доставки" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Что собрать?")).toBeInTheDocument();
-    firstVisit.unmount();
-
-    render(<App />);
-    expect(screen.queryByRole("dialog", { name: "Первоначальная настройка" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Показать онбординг" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Адрес доставки: г Москва, ул Тверская, д 1" })).toBeInTheDocument();
   });
 
-  it("shows onboarding on the first visit even when the profile already has an address", () => {
-    mocks.authProfile.mockReturnValue({
-      ...mocks.authProfile(),
-      profile: { ...DEFAULT_PROFILE, address: "Москва, Тверская 1" },
-    });
-
+  it("enters Home only after retailer resolution finishes", async () => {
     render(<App />);
-
-    expect(screen.getByRole("dialog", { name: "Первоначальная настройка" })).toBeInTheDocument();
-  });
-
-  it("keeps a button that opens onboarding again after it was dismissed", () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Пропустить настройку" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Показать онбординг" }));
-
-    expect(screen.getByRole("heading", { name: "Соберём покупки вместо вас" })).toBeInTheDocument();
-  });
-
-  it("resumes the persisted unfinished step", () => {
-    saveOnboardingState({
-      version: 1,
-      status: "in_progress",
-      step: "profile",
-      requestDraft: "",
-      resultsHintDismissed: false,
-      basketEditHintDismissed: false,
-    });
-
-    render(<App />);
-
-    expect(screen.getByRole("heading", { name: "Что учитывать в ваших корзинах?" })).toBeInTheDocument();
-  });
-
-  it("preserves a Home request through required delivery setup", async () => {
-    mocks.findLentaStores.mockResolvedValue([
-      { id: "525", name: "ТК1453", address: "Москва, Овчинниковская наб., 22/24с1", distanceMeters: 1127 },
-    ]);
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Пропустить настройку" }));
-    fireEvent.change(screen.getByLabelText("Что собрать?"), { target: { value: "ужины на три дня" } });
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Тверская 1" } });
     fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
-    expect(screen.getByRole("heading", { name: "Где вы покупаете продукты?" })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Вавилова 19" } });
-    expect(await screen.findByText("ТК1453, Москва, Овчинниковская наб., 22/24с1")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
-    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Адрес доставки" })).not.toBeInTheDocument());
+    expect(mocks.updateProfile).toHaveBeenCalledWith(expect.objectContaining({ address: "г Москва, ул Тверская, д 1", lentaStoreId: "525" }));
+  });
 
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Первоначальная настройка" })).not.toBeInTheDocument());
-    expect(screen.getByLabelText("Что собрать?")).toHaveValue("ужины на три дня");
-    fireEvent.click(screen.getByRole("button", { name: "Подобрать 3 корзины" }));
-    expect(mocks.submit).toHaveBeenCalledWith("ужины на три дня");
+  it("opens the same flow from the Home address and resets the old basket context", async () => {
+    profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Старая, д 1", lentaStoreId: "111", lentaStoreName: "Старая Лента" };
+    mocks.resolveDeliveryContext.mockResolvedValue({
+      status: "ready",
+      address: "г Москва, ул Новая, д 2",
+      retailers: ["vkusvill"],
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Адрес доставки: г Москва, ул Старая, д 1" }));
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Новая 2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+
+    await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledWith(expect.objectContaining({ address: "г Москва, ул Новая, д 2" })));
+    expect(mocks.updateProfile).toHaveBeenCalledWith(expect.not.objectContaining({ lentaStoreId: expect.anything() }));
+    expect(mocks.reset).toHaveBeenCalledOnce();
   });
 
   it("starts a new search from results without redirecting back to the old basket", () => {
-    saveOnboardingState({
-      version: 1, status: "dismissed", step: "value", requestDraft: "",
-      resultsHintDismissed: true, basketEditHintDismissed: true,
-    });
+    profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Тверская, д 1", lentaStoreId: "525" };
     window.history.replaceState(null, "", "/results");
     const planner = makePlanner();
     planner.state = {
@@ -168,7 +147,7 @@ function makePlanner() {
     mockResults: vi.fn(),
     createCart: vi.fn(),
     cancel: vi.fn(),
-    reset: vi.fn(),
+    reset: mocks.reset,
     replaceItem: vi.fn(),
     selectVariant: vi.fn(),
     clearVariantSelection: vi.fn(),

@@ -23,6 +23,7 @@ export function App() {
   const [route, setRoute] = useState<"home" | "results">(currentRoute);
   const hasResults = planner.state.variants.length > 0;
   const onboarding = useOnboarding({ ready: authProfile.authStatus !== "loading" });
+  const [addressFlowOpen, setAddressFlowOpen] = useState(false);
   const { mockResults } = planner;
   const firstBasketsTracked = useRef(false);
   const firstVariantOpenedTracked = useRef(false);
@@ -30,6 +31,9 @@ export function App() {
   const firstCheckoutTracked = useRef(false);
   const appContentRef = useRef<HTMLDivElement>(null);
   const loading = loadingStages.includes(planner.state.stage);
+  const validAddress = authProfile.profile.address.trim().length >= 8 && /\d/.test(authProfile.profile.address);
+  const hasSavedContext = validAddress && (Boolean(authProfile.profile.lentaStoreId) || onboarding.state.status === "completed");
+  const addressGateVisible = authProfile.authStatus !== "loading" && (!hasSavedContext || addressFlowOpen);
   const loaderVisual = useLoaderVisualState(planner.state.stage, hasResults);
   const debugResults = import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "results";
   const openHome = () => {
@@ -76,14 +80,14 @@ export function App() {
   }, [hasResults, onboarding.showResultsHint, planner.state.stage]);
 
   useEffect(() => {
-    if (onboarding.visible) appContentRef.current?.setAttribute("inert", "");
+    if (addressGateVisible) appContentRef.current?.setAttribute("inert", "");
     else appContentRef.current?.removeAttribute("inert");
-  }, [onboarding.visible]);
+  }, [addressGateVisible]);
 
   return (
     <>
-      <div ref={appContentRef} aria-hidden={onboarding.visible || undefined}>
-        <AppShell route={route} authProfile={authProfile} onOpenOnboarding={onboarding.replay}>
+      <div ref={appContentRef} aria-hidden={addressGateVisible || undefined}>
+        <AppShell route={route} authProfile={authProfile} onOpenAddress={() => setAddressFlowOpen(true)}>
           {route === "results" ? (
             hasResults ? (
               <BasketResults
@@ -136,11 +140,18 @@ export function App() {
           />
         )}
       </div>
-      {onboarding.visible && (
+      {addressGateVisible && (
         <OnboardingFlow
-          onboarding={onboarding}
           profile={authProfile.profile}
           onProfileChange={authProfile.updateProfile}
+          onComplete={(nextProfile) => {
+            const previousContext = `${authProfile.profile.address}:${authProfile.profile.lentaStoreId || ""}`;
+            const nextContext = `${nextProfile.address}:${nextProfile.lentaStoreId || ""}`;
+            if (hasSavedContext && previousContext !== nextContext) planner.reset();
+            onboarding.complete();
+            setAddressFlowOpen(false);
+          }}
+          onCancel={hasSavedContext ? () => setAddressFlowOpen(false) : undefined}
         />
       )}
     </>

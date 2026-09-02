@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, CircleHelp, Copy, ExternalLink, Gift, Heart, Home, Loader2, MapPin, Menu, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Copy, ExternalLink, Gift, Heart, Home, Loader2, MapPin, Menu, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { BasketItem, BasketVariant, CheckoutResult, LentaStore, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
@@ -78,12 +78,9 @@ function scrollToTop() {
   window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
 }
 
-export function AppShell({ children, route, authProfile, onOpenOnboarding }: { children: ReactNode; route: "home" | "results"; authProfile: AuthProfile; onOpenOnboarding: () => void }) {
+export function AppShell({ children, route, authProfile, onOpenAddress }: { children: ReactNode; route: "home" | "results"; authProfile: AuthProfile; onOpenAddress: () => void }) {
   return (
     <main className={`app-shell kit-shell ${route}-route`} data-g2-mode="compact">
-      <button className="onboarding-trigger liquid-glass" type="button" onClick={onOpenOnboarding} aria-label="Показать онбординг" title="Как это работает">
-        <CircleHelp size={19} />
-      </button>
       <ProfileControl
         profile={authProfile.profile}
         authConfigured={authProfile.authConfigured}
@@ -92,8 +89,9 @@ export function AppShell({ children, route, authProfile, onOpenOnboarding }: { c
         onChange={authProfile.updateProfile}
         onSendOtp={authProfile.sendOtp}
         onSignOut={authProfile.signOut}
+        onOpenAddress={onOpenAddress}
       />
-      <Header route={route} />
+      <Header route={route} address={authProfile.profile.address} onOpenAddress={onOpenAddress} />
       <div className="workspace">
         {children}
       </div>
@@ -110,6 +108,7 @@ export function ProfileControl({
   onChange,
   onSendOtp,
   onSignOut,
+  onOpenAddress,
 }: {
   profile: UserProfile;
   authConfigured: boolean;
@@ -118,6 +117,7 @@ export function ProfileControl({
   onChange: (profile: UserProfile) => Promise<void> | void;
   onSendOtp: (email: string) => Promise<void> | void;
   onSignOut: () => Promise<void> | void;
+  onOpenAddress?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<UserProfile>(() => normalizeProfile(profile));
@@ -314,8 +314,8 @@ export function ProfileControl({
 
   return (
     <>
-      <button ref={triggerRef} className={`profile-trigger liquid-glass ${hasAddress ? "has-address" : ""}`} type="button" onClick={() => setOpen(true)} aria-label={hasAddress ? `Адрес: ${profile.address}` : "Добавить адрес"}>
-        {hasAddress ? <MapPin size={19} /> : <User size={19} />}
+      <button ref={triggerRef} className={`profile-trigger liquid-glass ${hasAddress ? "has-address" : ""}`} type="button" onClick={() => setOpen(true)} aria-label="Открыть профиль">
+        <User size={19} />
       </button>
       {toast && <div className="profile-toast" role="status">{toast}</div>}
       {open && (
@@ -357,6 +357,19 @@ export function ProfileControl({
               <section className="profile-section" aria-labelledby="profile-address-title">
                 <h3 id="profile-address-title">Адрес доставки</h3>
                 <p className="profile-dialog-copy">Нужен для поиска товаров в ближайших магазинах.</p>
+                {onOpenAddress ? (
+                  <>
+                    <div className="profile-selected-store">
+                      <strong>{profile.address || "Адрес не указан"}</strong>
+                      {profile.lentaStoreName && <span>{profile.lentaStoreName}</span>}
+                    </div>
+                    <button className="secondary-button profile-location-button" type="button" onClick={() => {
+                      closeDialog();
+                      onOpenAddress();
+                    }}>Изменить адрес</button>
+                  </>
+                ) : (
+                  <>
                 <label htmlFor="profile-address">Адрес</label>
                 <div className="profile-address-control">
                   <input
@@ -428,6 +441,8 @@ export function ProfileControl({
                   Определить автоматически
                 </button>
                 {geoStatus !== "idle" && <p className="profile-dialog-copy" role="status">{geoStatusCopy[geoStatus]}</p>}
+                  </>
+                )}
               </section>
               <section className="profile-section" aria-labelledby="profile-household-title">
                 <div className="profile-section-heading">
@@ -572,17 +587,17 @@ function sameProfile(left: UserProfile, right: UserProfile) {
   return JSON.stringify(normalizeProfile(left)) === JSON.stringify(normalizeProfile(right));
 }
 
-export function Header({ route }: { route: "home" | "results" }) {
+export function Header({ route, address, onOpenAddress }: { route: "home" | "results"; address: string; onOpenAddress: () => void }) {
   if (route === "results") return null;
 
   return (
     <header className="header vv-preview-header" data-od-id="app-header">
       <div className="delivery-topbar">
         <button className="icon-button topbar-button" type="button" aria-label="Поиск"><Search size={20} /></button>
-        <div className="delivery-location">
+        <button className="delivery-location" type="button" onClick={onOpenAddress} aria-label={`Адрес доставки: ${address}`}>
           <span>Доставка</span>
-          <strong><MapPin size={14} /> Москва</strong>
-        </div>
+          <strong><MapPin size={14} /> {shortAddress(address)}</strong>
+        </button>
         <span aria-hidden="true" />
       </div>
       <div className="hero-offer">
@@ -595,6 +610,10 @@ export function Header({ route }: { route: "home" | "results" }) {
       </div>
     </header>
   );
+}
+
+function shortAddress(address: string) {
+  return address.split(",").slice(0, 2).join(",").trim() || "Указать адрес";
 }
 
 export function ConversationPanel({ planner, hasDeliveryAddress, onNeedsDelivery, draft, onDraftChange }: { planner: Planner; hasDeliveryAddress: boolean; onNeedsDelivery?: (request: string) => void; draft?: string; onDraftChange?: (request: string) => void }) {

@@ -196,10 +196,19 @@ button:disabled {
 
 .delivery-location {
   min-width: 0;
+  min-height: 44px;
+  padding: 0 8px;
   display: grid;
   justify-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  font: inherit;
   line-height: 1.15;
+  cursor: pointer;
 }
+
+.delivery-location:hover { background: var(--surface-soft); }
 
 .delivery-location span {
   color: var(--text-muted);

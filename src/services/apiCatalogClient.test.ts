@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiCatalogClient } from "./catalog";
+import { ApiCatalogClient, resolveDeliveryContext } from "./catalog";
 import { DEFAULT_PROFILE } from "./profileRepository";
 
 describe("ApiCatalogClient", () => {
@@ -126,3 +126,68 @@ describe("ApiCatalogClient", () => {
     });
   });
 });
+
+describe("resolveDeliveryContext", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("normalizes the address and reports only actually available retailers", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ suggestions: ["г Москва, ул Тверская, д 1"] }))
+      .mockResolvedValueOnce(ok({ stores: [] }))
+      .mockResolvedValueOnce(ok({
+        mode: "live",
+        providers: {
+          vkusvill: { connected: true },
+          lenta: { enabled: true, store: "missing" },
+          pyaterochka: { connected: true, store: "resolved" },
+        },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveDeliveryContext("Москва, Тверская 1")).resolves.toEqual({
+      status: "ready",
+      address: "г Москва, ул Тверская, д 1",
+      retailers: ["vkusvill", "pyaterochka"],
+    });
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/address/suggest",
+      "/api/catalog/lenta/stores",
+      "/api/catalog/status?address=%D0%B3%20%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0%2C%20%D1%83%D0%BB%20%D0%A2%D0%B2%D0%B5%D1%80%D1%81%D0%BA%D0%B0%D1%8F%2C%20%D0%B4%201",
+    ]);
+  });
+
+  it("does not mark Lenta available without a resolved store id", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ suggestions: ["г Москва, ул Тверская, д 1"] }))
+      .mockResolvedValueOnce(ok({ stores: [] }))
+      .mockResolvedValueOnce(ok({ mode: "demo", providers: { vkusvill: { connected: false }, lenta: { enabled: true }, pyaterochka: { connected: false } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveDeliveryContext("Москва, Тверская 1")).resolves.toEqual({
+      status: "no_retailers",
+      address: "г Москва, ул Тверская, д 1",
+      retailers: [],
+    });
+  });
+
+  it("keeps available retailers when Lenta resolution fails", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ suggestions: ["г Москва, ул Тверская, д 1"] }))
+      .mockRejectedValueOnce(new Error("Lenta unavailable"))
+      .mockResolvedValueOnce(ok({ mode: "live", providers: { vkusvill: { connected: true }, lenta: { enabled: true }, pyaterochka: { connected: false } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveDeliveryContext("Москва, Тверская 1")).resolves.toEqual({
+      status: "ready",
+      address: "г Москва, ул Тверская, д 1",
+      retailers: ["vkusvill"],
+    });
+  });
+});
+
+function ok(value: unknown) {
+  return { ok: true, status: 200, json: async () => value };
+}

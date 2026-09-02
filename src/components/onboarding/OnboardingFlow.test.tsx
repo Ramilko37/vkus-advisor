@@ -1,171 +1,123 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useOnboarding } from "../../hooks/useOnboarding";
 import { DEFAULT_PROFILE } from "../../services/profileRepository";
-import type { UserProfile } from "../../types/domain";
 import { OnboardingFlow } from "./OnboardingFlow";
 
 const mocks = vi.hoisted(() => ({
-  findLentaStores: vi.fn(),
+  resolveDeliveryContext: vi.fn(),
   suggestAddresses: vi.fn(),
   reverseGeocodeAddress: vi.fn(),
 }));
 
 vi.mock("../../services/catalog", () => ({
-  findLentaStores: mocks.findLentaStores,
+  resolveDeliveryContext: mocks.resolveDeliveryContext,
   suggestAddresses: mocks.suggestAddresses,
   reverseGeocodeAddress: mocks.reverseGeocodeAddress,
 }));
 
-describe("OnboardingFlow", () => {
+describe("address-first flow", () => {
   beforeEach(() => {
-    mocks.findLentaStores.mockResolvedValue([]);
+    mocks.resolveDeliveryContext.mockResolvedValue({
+      status: "ready",
+      address: "г Москва, ул Тверская, д 1",
+      retailers: ["vkusvill", "lenta"],
+      lentaStore: { id: "525", name: "Лента", address: "Овчинниковская наб., 22/24с1" },
+    });
     mocks.suggestAddresses.mockResolvedValue([]);
     mocks.reverseGeocodeAddress.mockResolvedValue([]);
   });
 
   afterEach(() => {
     cleanup();
-    window.localStorage.clear();
-    mocks.findLentaStores.mockReset();
-    mocks.suggestAddresses.mockReset();
-    mocks.reverseGeocodeAddress.mockReset();
+    vi.clearAllMocks();
     Object.defineProperty(navigator, "geolocation", { configurable: true, value: undefined });
   });
 
-  it("finishes after profile setup and reveals the main screen", async () => {
-    const onProfileChange = vi.fn();
-    mocks.findLentaStores.mockResolvedValue([
-      { id: "525", name: "Лента", address: "Овчинниковская наб., 22/24с1", distanceMeters: 1100 },
-    ]);
-    render(<Harness onProfileChange={onProfileChange} />);
+  it("starts with the mandatory address gate and exact product copy", () => {
+    render(<OnboardingFlow profile={DEFAULT_PROFILE} onProfileChange={vi.fn()} onComplete={vi.fn()} />);
 
-    expect(screen.getByRole("heading", { name: "Соберём покупки вместо вас" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+    expect(screen.getByRole("heading", { name: "Куда доставить продукты?" })).toBeInTheDocument();
+    expect(screen.getByText("Адрес нужен, чтобы искать товары и цены в магазинах рядом с вами.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Использовать геопозицию" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Продолжить" })).toBeDisabled();
+    expect(screen.queryByText("Соберём покупки вместо вас")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Пропустить настройку" })).not.toBeInTheDocument();
+  });
+
+  it("resolves stores only after confirmation and saves normalized context", async () => {
+    const onProfileChange = vi.fn();
+    const onComplete = vi.fn();
+    let finishResolution!: (value: unknown) => void;
+    mocks.resolveDeliveryContext.mockImplementation(() => new Promise((resolve) => { finishResolution = resolve; }));
+    render(<OnboardingFlow profile={DEFAULT_PROFILE} onProfileChange={onProfileChange} onComplete={onComplete} />);
 
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Тверская 1" } });
-    expect(await screen.findByText("Лента, Овчинниковская наб., 22/24с1")).toBeInTheDocument();
+    expect(mocks.resolveDeliveryContext).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
-    expect(screen.getByRole("heading", { name: "Что учитывать в ваших корзинах?" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Увеличить количество людей" }));
-    fireEvent.change(screen.getByLabelText("Что точно не покупать?"), { target: { value: "грибы" } });
-    fireEvent.keyDown(screen.getByLabelText("Что точно не покупать?"), { key: "Enter" });
-    fireEvent.change(screen.getByLabelText("Что предпочитаете?"), { target: { value: "больше белка" } });
-    fireEvent.keyDown(screen.getByLabelText("Что предпочитаете?"), { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Первоначальная настройка" })).not.toBeInTheDocument();
-      expect(screen.getByText("Главный экран")).toBeInTheDocument();
-      expect(onProfileChange).toHaveBeenCalledWith(expect.objectContaining({
-        address: "Москва, Тверская 1",
-        lentaStoreId: "525",
-        householdSize: 2,
-        excludedIngredients: ["грибы"],
-        preferences: ["больше белка"],
-      }));
+    expect(screen.getByText("Ищем магазины рядом…")).toBeInTheDocument();
+    finishResolution({
+      status: "ready",
+      address: "г Москва, ул Тверская, д 1",
+      retailers: ["vkusvill", "lenta"],
+      lentaStore: { id: "525", name: "Лента", address: "Овчинниковская наб., 22/24с1" },
     });
-  });
-
-  it("automatically selects the nearest Lenta when several stores are found", async () => {
-    const onProfileChange = vi.fn();
-    mocks.findLentaStores.mockResolvedValue([
-      { id: "525", name: "ТК1453", address: "Москва, Овчинниковская наб., 22/24с1", distanceMeters: 1127 },
-      { id: "3560", name: "ТК1900", address: "Москва, 3-я Владимирская улица, 23", distanceMeters: 10823 },
-    ]);
-    render(<Harness onProfileChange={onProfileChange} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
-    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Вавилова 19" } });
-    expect(await screen.findByRole("radio", { name: /ТК1453/ })).toBeChecked();
-    expect(screen.getByRole("button", { name: "Продолжить" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
     await waitFor(() => expect(onProfileChange).toHaveBeenCalledWith(expect.objectContaining({
-      address: "Москва, Вавилова 19",
+      address: "г Москва, ул Тверская, д 1",
       lentaStoreId: "525",
     })));
+    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ lentaStoreId: "525" }), ["vkusvill", "lenta"]);
   });
 
-  it("does not continue without a resolved Lenta store", async () => {
-    mocks.findLentaStores.mockResolvedValue([]);
-    render(<Harness onProfileChange={vi.fn()} />);
+  it("shows the exact address-not-found state", async () => {
+    mocks.resolveDeliveryContext.mockResolvedValue({ status: "address_not_found" });
+    render(<OnboardingFlow profile={DEFAULT_PROFILE} onProfileChange={vi.fn()} onComplete={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
-    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Вавилова 19" } });
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Неверная 999" } });
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
-    expect(await screen.findByText("Не нашли подходящий магазин для этого адреса")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Продолжить" })).toBeDisabled();
+    expect(await screen.findByText("Не нашли этот адрес. Проверьте написание или укажите другой.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Продолжить" })).toBeEnabled();
   });
 
-  it("preserves a trailing space while the address is being typed", () => {
-    render(<Harness onProfileChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+  it("shows the exact unavailable state when no retailer can serve the address", async () => {
+    mocks.resolveDeliveryContext.mockResolvedValue({ status: "no_retailers", address: "Москва, Тверская 1", retailers: [] });
+    render(<OnboardingFlow profile={DEFAULT_PROFILE} onProfileChange={vi.fn()} onComplete={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва " } });
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Тверская 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
-    expect(screen.getByLabelText("Адрес")).toHaveValue("Москва ");
+    expect(await screen.findByText("Пока не нашли магазины, с которыми умеем работать по этому адресу.")).toBeInTheDocument();
   });
 
-  it("shows DaData suggestions and selects an address", async () => {
-    mocks.suggestAddresses.mockResolvedValue(["г Москва, ул Тверская, д 1"]);
-    render(<Harness onProfileChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+  it("allows partial availability without inventing a Lenta store", async () => {
+    const onComplete = vi.fn();
+    mocks.resolveDeliveryContext.mockResolvedValue({
+      status: "ready",
+      address: "г Москва, ул Тверская, д 1",
+      retailers: ["vkusvill"],
+    });
+    render(<OnboardingFlow profile={{ ...DEFAULT_PROFILE, lentaStoreId: "old" }} onProfileChange={vi.fn()} onComplete={onComplete} />);
 
-    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва Твер" } });
-    fireEvent.click(await screen.findByRole("option", { name: "г Москва, ул Тверская, д 1" }));
+    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Тверская 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
-    expect(screen.getByLabelText("Адрес")).toHaveValue("г Москва, ул Тверская, д 1");
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith(expect.not.objectContaining({ lentaStoreId: expect.anything() }), ["vkusvill"]));
   });
 
-  it("closes address suggestions with Escape without dismissing onboarding", async () => {
-    mocks.suggestAddresses.mockResolvedValue(["г Москва, ул Тверская, д 1"]);
-    render(<Harness onProfileChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
-    const input = screen.getByLabelText("Адрес");
-    fireEvent.change(input, { target: { value: "Москва Твер" } });
-    expect(await screen.findByRole("option")).toBeInTheDocument();
-
-    fireEvent.keyDown(input, { key: "Escape" });
-
-    expect(screen.queryByRole("option")).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Первоначальная настройка" })).toBeInTheDocument();
-  });
-
-  it("fills the address from browser geolocation", async () => {
+  it("keeps manual input available when geolocation is denied", async () => {
     Object.defineProperty(navigator, "geolocation", {
       configurable: true,
       value: {
-        getCurrentPosition: vi.fn((success: PositionCallback) => success({ coords: { latitude: 55.76, longitude: 37.62 } } as GeolocationPosition)),
+        getCurrentPosition: vi.fn((_success: PositionCallback, error: PositionErrorCallback) => error({ code: 1 } as GeolocationPositionError)),
       },
     });
-    mocks.reverseGeocodeAddress.mockResolvedValue(["г Москва, ул Петровка, д 17"]);
-    render(<Harness onProfileChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+    render(<OnboardingFlow profile={DEFAULT_PROFILE} onProfileChange={vi.fn()} onComplete={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Определить адрес автоматически" }));
+    fireEvent.click(screen.getByRole("button", { name: "Использовать геопозицию" }));
 
-    expect(await screen.findByLabelText("Адрес")).toHaveValue("г Москва, ул Петровка, д 17");
+    expect(await screen.findByText("Доступ к геопозиции запрещён — введите адрес вручную.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Адрес")).toBeEnabled();
   });
 });
-
-function Harness({ onProfileChange }: { onProfileChange: (profile: UserProfile) => void }) {
-  const [profile, setProfile] = useState(DEFAULT_PROFILE);
-  const onboarding = useOnboarding({ ready: true });
-  return (
-    <>
-      <div>Главный экран</div>
-      {onboarding.visible && <OnboardingFlow
-        onboarding={onboarding}
-        profile={profile}
-        onProfileChange={(next) => {
-          setProfile(next);
-          onProfileChange(next);
-        }}
-      />}
-    </>
-  );
-}

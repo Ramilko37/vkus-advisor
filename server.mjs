@@ -82,7 +82,7 @@ export async function handleRequest(req, res) {
     if (url.pathname === "/api/openrouter" && req.method === "POST") return await handleOpenRouter(req, res);
     if (url.pathname === "/api/address/suggest" && req.method === "POST") return await handleAddressSuggest(req, res);
     if (url.pathname === "/api/address/geolocate" && req.method === "POST") return await handleAddressGeolocate(req, res);
-    if (url.pathname === "/api/catalog/status") return await handleCatalogStatus(res);
+    if (url.pathname === "/api/catalog/status") return await handleCatalogStatus(url, res);
     if (url.pathname === "/api/catalog/lenta/stores" && req.method === "POST") return await handleLentaStores(req, res);
     if (url.pathname === "/api/catalog/search" && req.method === "POST") return await handleCatalogSearch(req, res);
     if (url.pathname === "/api/catalog/details") return await handleCatalogDetails(url, res);
@@ -544,8 +544,8 @@ function effectiveModel(model) {
   return model === "openrouter/free" ? defaultStructuredModel : model;
 }
 
-async function handleCatalogStatus(res) {
-  await ensureMcp();
+async function handleCatalogStatus(url, res) {
+  await ensureMcp(cleanText(stringValue(url.searchParams.get("address"))));
   send(res, 200, { mode: catalogMode, ...catalogProviderStatus() });
 }
 
