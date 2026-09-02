@@ -133,6 +133,23 @@ describe("App address-first entry", () => {
     expect(mocks.reset).toHaveBeenCalledOnce();
   });
 
+  it("opens address recovery when the current retailer is unavailable", () => {
+    profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Тверская, д 1", lentaStoreId: "525" };
+    const planner = makePlanner();
+    planner.state = {
+      ...planner.state,
+      stage: "error",
+      pendingMessage: "ужины на три дня",
+      error: { source: "mcp", code: "retailer_unavailable", message: "Магазин временно недоступен.", recoverable: true },
+    } as never;
+    mocks.basketPlanner.mockReturnValue(planner);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать другой магазин" }));
+
+    expect(screen.getByRole("dialog", { name: "Адрес доставки" })).toBeInTheDocument();
+  });
+
   it("starts a new search from results without redirecting back to the old basket", () => {
     profile = { ...DEFAULT_PROFILE, address: "г Москва, ул Тверская, д 1", lentaStoreId: "525" };
     window.history.replaceState(null, "", "/results");

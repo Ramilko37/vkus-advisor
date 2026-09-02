@@ -134,7 +134,10 @@ export function App() {
               retailers={resolvedRetailers}
               draft={onboarding.state.requestDraft}
               onDraftChange={onboarding.setRequestDraft}
-              onNeedsDelivery={(request) => onboarding.open("delivery", request)}
+              onNeedsDelivery={(request) => {
+                onboarding.open("delivery", request);
+                setAddressFlowOpen(true);
+              }}
             />
           )}
         </AppShell>
