@@ -1,8 +1,8 @@
 import { basketPrompt } from "../prompts/basketPrompt";
 import { intentPrompt } from "../prompts/intentPrompt";
-import { basketCompareResponseSchema, basketDraftJsonSchema, basketDraftResponseSchema, basketIntentJsonSchema, basketIntentSchema } from "../schemas";
+import { basketDraftJsonSchema, basketDraftResponseSchema, basketIntentJsonSchema, basketIntentSchema } from "../schemas";
 import type { BasketIntent, BasketItem, BasketItemRole, BasketReasonCode, BasketVariant, BasketVariantDraft, CatalogClient, NormalizedProduct, RetailerResult, StructuredGenerationResult, UserProfile } from "../types/domain";
-import { basketItemsMeetConstraints, buildTargetCoverage, hydrateAndValidateVariants, productViolatesConstraints, scoreBasketVariants, strategyTradeoffsHold } from "./basketValidation";
+import { hydrateAndValidateVariants } from "./basketValidation";
 import { candidatePayloadBytes, selectCandidatesForLlm, toLlmCandidate } from "./candidateSelection";
 import { compactPreviousIntent, normalizeBasketIntent } from "./intentUtils";
 import { measureStage } from "./pipelineMetrics";
@@ -79,7 +79,6 @@ export async function composeBaskets(
   signal?: AbortSignal,
   reusedCandidates?: NormalizedProduct[],
 ): Promise<ComposeResult> {
-  const targetCoverage = buildTargetCoverage(intent);
   const catalogReused = Boolean(reusedCandidates && (
     catalog.mode !== "live" || reusedCandidates.filter((product) => product.retailer === "lenta").length >= 4
   ));
@@ -104,15 +103,13 @@ export async function composeBaskets(
   if (!composableGroups.length) {
     throw new Error("Не удалось найти достаточно подходящих товаров. Попробуйте упростить ограничения.");
   }
-  const basketResult = await composeRetailerBaskets(composableGroups, intent, targetCoverage, llm, sessionId, signal);
+  const basketResult = await composeRetailerBaskets(composableGroups, intent, llm, sessionId, signal);
   const llmCandidates = composableGroups.flatMap((group) => group.candidates.map((product) => toLlmCandidate(product, intent)));
-  const refreshedVariants = await refreshValidatedBasketItems(basketResult.variants, catalog, signal);
-  const variants = scoreBasketVariants(refreshedVariants.filter((variant) => basketItemsMeetConstraints(variant.items, variant.totalRub, intent)), intent);
-  const retailerContractsHold = composableGroups.every((group) => strategyTradeoffsHold(variants.filter((variant) => variant.retailer === (group.retailer ?? "demo"))));
-  if (variants.length !== composableGroups.length * 3 || !retailerContractsHold) {
+  const variants = await refreshValidatedBasketItems(basketResult.variants, catalog, signal);
+  const strategies = new Set(variants.map((variant) => variant.strategy));
+  if (variants.length !== composableGroups.length * 3 || strategies.size !== 3 || variants.some((variant) => variant.items.length === 0)) {
     throw new Error("Модель вернула неподходящий формат. Повторите сборку корзины.");
   }
-  basketCompareResponseSchema.parse({ variants });
   const retailerResults = buildRetailerResults(retailerGroups, selectedGroups, variants);
   return {
     intent,
@@ -137,7 +134,6 @@ export async function composeBaskets(
 async function composeRetailerBaskets(
   groups: Array<{ retailer?: NormalizedProduct["retailer"]; candidates: NormalizedProduct[] }>,
   intent: BasketIntent,
-  targetCoverage: BasketVariant["coverage"],
   llm: LlmClientLike,
   sessionId: string,
   signal?: AbortSignal,
@@ -149,7 +145,6 @@ async function composeRetailerBaskets(
       systemPrompt: basketPrompt,
       userPayload: {
         intent,
-        targetCoverage,
         retailers: groups.map((group) => group.retailer || "demo"),
         candidateProducts: llmCandidates,
       },
@@ -168,44 +163,31 @@ async function composeRetailerBaskets(
     variants: groups.flatMap((group) => {
       const retailer = group.retailer || "demo";
       const drafts = basketResult.data.variants.filter((draft) => draft.retailer === retailer || (groups.length === 1 && !draft.retailer));
-      const hydrated = hydrateAndValidateVariants(drafts, group.candidates, intent, targetCoverage);
-      const fallback = deterministicRetailerVariants(group.candidates, intent, targetCoverage);
-      const repaired = (["balanced", "economy", "fast"] as const).flatMap((strategy) => hydrated.find((variant) => variant.strategy === strategy) ?? fallback.find((variant) => variant.strategy === strategy) ?? []);
-      const balanced = repaired.find((variant) => variant.strategy === "balanced");
-      const tradeoffRepaired = repaired.map((variant) => {
-        if (!balanced) return variant;
-        const violatesTradeoff = variant.strategy === "economy"
-          ? variant.totalRub > balanced.totalRub
-          : variant.strategy === "fast" && variant.prep.minutes > balanced.prep.minutes;
-        return violatesTradeoff ? fallback.find((item) => item.strategy === variant.strategy) : variant;
-      }).filter((variant): variant is BasketVariant => Boolean(variant));
-      if (!strategyTradeoffsHold(tradeoffRepaired)) return [];
-      return tradeoffRepaired.map((variant) => ({
+      const hydrated = hydrateAndValidateVariants(drafts, group.candidates, intent);
+      return (hydrated.length === 3 ? hydrated : deterministicRetailerVariants(group.candidates, intent)).map((variant) => ({
         ...variant,
         id: group.retailer ? `${group.retailer}:${variant.id}` : variant.id,
-        retailer: group.retailer ?? "demo",
+        retailer: group.retailer,
       }));
     }),
   };
 }
 
-function deterministicRetailerVariants(candidates: NormalizedProduct[], intent: BasketIntent, targetCoverage: BasketVariant["coverage"]): BasketVariant[] {
-  const selected = selectCandidatesForLlm(candidates, intent, 12).filter((product) => !productViolatesConstraints(product, intent));
+function deterministicRetailerVariants(candidates: NormalizedProduct[], intent: BasketIntent): BasketVariant[] {
+  const selected = selectCandidatesForLlm(candidates, intent, 12);
   const cheap = [...selected].sort((a, b) => a.priceRub - b.priceRub);
   const quick = [...selected].sort((a, b) => quickScore(b) - quickScore(a));
   const drafts: BasketVariantDraft[] = [
-    deterministicDraft("balanced", selected.slice(0, 8), targetCoverage, 30),
-    deterministicDraft("economy", cheap.slice(0, 4), targetCoverage, 50),
-    deterministicDraft("fast", quick.slice(0, 4), targetCoverage, 10),
+    deterministicDraft("balanced", selected.slice(0, 8)),
+    deterministicDraft("budget", cheap.slice(0, 6)),
+    deterministicDraft("speed", quick.slice(0, 4)),
   ];
-  return hydrateAndValidateVariants(drafts, selected, intent, targetCoverage);
+  return hydrateAndValidateVariants(drafts, selected, intent);
 }
 
-function deterministicDraft(strategy: BasketVariant["strategy"], products: NormalizedProduct[], coverage: BasketVariant["coverage"], prepMinutes: number): BasketVariantDraft {
+function deterministicDraft(strategy: BasketVariant["strategy"], products: NormalizedProduct[]): BasketVariantDraft {
   return {
     strategy,
-    coverage,
-    prepMinutes,
     items: products.slice(0, 8).map((product) => ({ xmlId: product.xmlId, quantity: 1, role: roleForProduct(product), reasonCode: reasonForStrategy(strategy) })),
   };
 }
@@ -223,8 +205,8 @@ function roleForProduct(product: NormalizedProduct): BasketItemRole {
 }
 
 function reasonForStrategy(strategy: BasketVariant["strategy"]): BasketReasonCode {
-  if (strategy === "economy") return "budget_fit";
-  if (strategy === "fast") return "quick";
+  if (strategy === "budget") return "budget_fit";
+  if (strategy === "speed") return "quick";
   return "requested_by_user";
 }
 
@@ -300,23 +282,13 @@ async function refreshValidatedBasketItems(variants: BasketVariant[], catalog: C
     const missingRefresh = new Set(uniqueItems
       .filter((item) => !products.has(item.xmlId) && !unavailable.has(item.xmlId))
       .map((item) => item.xmlId));
-    const observedAt = validation.products.map((product) => product.priceObservedAt).filter((value): value is string => Boolean(value)).sort();
-    const checkedAt = observedAt[observedAt.length - 1] ?? new Date().toISOString();
     return variants.map((variant) => recalculateVariant({
       ...variant,
       items: variant.items.flatMap((item) => {
         if (item.retailer !== "lenta") return item;
         if (unavailable.has(item.xmlId)) return [];
         const product = products.get(item.xmlId);
-        return product ? {
-          ...item,
-          ...product,
-          composition: product.composition ?? item.composition,
-          description: product.description ?? item.description,
-          quantity: item.quantity,
-          role: item.role,
-          reason: item.reason,
-        } : item;
+        return product ? { ...product, quantity: item.quantity, role: item.role, reason: item.reason } : item;
       }),
       warnings: Array.from(new Set([
         ...variant.warnings,
@@ -324,15 +296,11 @@ async function refreshValidatedBasketItems(variants: BasketVariant[], catalog: C
         ...(variant.items.some((item) => changed.has(item.xmlId)) ? ["Цены Ленты обновлены перед показом корзины."] : []),
         ...(variant.items.some((item) => missingRefresh.has(item.xmlId)) ? ["Не удалось обновить часть товаров Ленты. Проверьте цену перед оформлением."] : []),
       ])),
-      validation: variant.retailer === "lenta"
-        ? { status: variant.items.some((item) => missingRefresh.has(item.xmlId)) ? "partial" : "validated", checkedAt }
-        : variant.validation,
     }));
   } catch {
     return variants.map((variant) => ({
       ...variant,
       warnings: Array.from(new Set([...variant.warnings, "Не удалось обновить данные Ленты. Попробуйте ещё раз."])),
-      validation: variant.retailer === "lenta" ? { status: "failed", checkedAt: null } : variant.validation,
     }));
   }
 }

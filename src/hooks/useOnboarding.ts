@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { loadOnboardingState, saveOnboardingState } from "../services/onboardingRepository";
-import type { OnboardingState, OnboardingStep, Retailer } from "../types/domain";
+import type { OnboardingState, OnboardingStep } from "../types/domain";
 
 const previousStep: Partial<Record<OnboardingStep, OnboardingStep>> = {
   delivery: "value",
@@ -30,14 +30,7 @@ export function useOnboarding({ ready }: { ready: boolean }) {
     back: () => update((current) => ({ ...current, step: previousStep[current.step] ?? "value" })),
     dismiss: () => update((current) => ({ ...current, status: "dismissed" })),
     setRequestDraft: (requestDraft: string) => update((current) => ({ ...current, requestDraft })),
-    complete: (resolvedAddress?: string, resolvedRetailers: Retailer[] = []) => update((current) => ({
-      ...current,
-      status: "completed",
-      step: "profile",
-      completedAt: new Date().toISOString(),
-      resolvedRetailers,
-      ...(resolvedAddress ? { resolvedAddress } : {}),
-    })),
+    complete: () => update((current) => ({ ...current, status: "completed", step: "profile", completedAt: new Date().toISOString() })),
     dismissResultsHint: () => update((current) => ({ ...current, resultsHintDismissed: true })),
     dismissBasketEditHint: () => update((current) => ({ ...current, basketEditHintDismissed: true })),
   };

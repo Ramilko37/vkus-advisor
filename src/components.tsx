@@ -1,6 +1,6 @@
-import { AlertTriangle, ChevronLeft, ExternalLink, Loader2, MapPin, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, CircleHelp, Copy, ExternalLink, Gift, Heart, Home, Loader2, MapPin, Menu, Minus, Plus, RefreshCw, Search, ShoppingBasket, Trash2, User, X } from "lucide-react";
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import type { BasketItem, BasketVariant, CheckoutResult, LentaStore, Retailer, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
+import type { BasketItem, BasketVariant, CheckoutResult, LentaStore, RetailerResult, UserProfile, WorkflowStage } from "./types/domain";
 import type { useBasketPlanner } from "./hooks/useBasketPlanner";
 import type { AuthStatus } from "./hooks/useAuthProfile";
 import { normalizeProfile } from "./services/profileRepository";
@@ -20,10 +20,24 @@ type AuthProfile = {
 };
 
 const examples = [
-  { title: "Ужины на 3 дня", prompt: "Ужины на 3 дня для двоих до 3000 ₽, без грибов" },
-  { title: "Продукты на неделю", prompt: "Продукты на неделю для семьи" },
-  { title: "Максимально бюджетно", prompt: "Собрать продукты максимально бюджетно" },
-  { title: "Минимум готовки", prompt: "Продукты на несколько дней с минимумом готовки" },
+  { title: "Ужины на 3 дня", meta: "2 человека · до 3000 ₽ · без грибов", prompt: "Ужины на 3 дня для двоих до 3000 ₽, без грибов" },
+  { title: "Белковая корзина", meta: "Рабочая неделя · для одного", prompt: "Белковая корзина на рабочую неделю для одного человека" },
+  { title: "Почти без готовки", meta: "На 4 дня · быстрые блюда", prompt: "Максимально простая еда на 4 дня, почти без готовки" },
+];
+
+const briefChips = [
+  { label: "3 дня", fragment: "на 3 дня" },
+  { label: "для двоих", fragment: "для двоих" },
+  { label: "до 3000 ₽", fragment: "до 3000 ₽" },
+  { label: "без грибов", fragment: "без грибов" },
+  { label: "быстро", fragment: "почти без готовки" },
+];
+
+const categoryShortcuts = [
+  { label: "Молочное", icon: "🥛", fragment: "молочные продукты" },
+  { label: "Мясо", icon: "🥩", fragment: "мясо и белок" },
+  { label: "Овощи", icon: "🥬", fragment: "овощи и зелень" },
+  { label: "Готовое", icon: "🍱", fragment: "готовая еда" },
 ];
 
 const stageLabels: Record<WorkflowStage, string> = {
@@ -35,7 +49,6 @@ const stageLabels: Record<WorkflowStage, string> = {
   ready: "Готово к выбору",
   creatingCart: "Готовим корзину",
   error: "Нужна правка",
-  canceled: "Отменено",
 };
 
 const roleLabels: Record<string, string> = {
@@ -65,9 +78,12 @@ function scrollToTop() {
   window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
 }
 
-export function AppShell({ children, route, authProfile, onOpenAddress }: { children: ReactNode; route: "home" | "results"; authProfile: AuthProfile; onOpenAddress: () => void }) {
+export function AppShell({ children, route, authProfile, onOpenOnboarding }: { children: ReactNode; route: "home" | "results"; authProfile: AuthProfile; onOpenOnboarding: () => void }) {
   return (
     <main className={`app-shell kit-shell ${route}-route`} data-g2-mode="compact">
+      <button className="onboarding-trigger liquid-glass" type="button" onClick={onOpenOnboarding} aria-label="Показать онбординг" title="Как это работает">
+        <CircleHelp size={19} />
+      </button>
       <ProfileControl
         profile={authProfile.profile}
         authConfigured={authProfile.authConfigured}
@@ -76,12 +92,12 @@ export function AppShell({ children, route, authProfile, onOpenAddress }: { chil
         onChange={authProfile.updateProfile}
         onSendOtp={authProfile.sendOtp}
         onSignOut={authProfile.signOut}
-        onOpenAddress={onOpenAddress}
       />
-      <Header route={route} address={authProfile.profile.address} onOpenAddress={onOpenAddress} />
+      <Header route={route} />
       <div className="workspace">
         {children}
       </div>
+      <BottomNav route={route} />
     </main>
   );
 }
@@ -94,7 +110,6 @@ export function ProfileControl({
   onChange,
   onSendOtp,
   onSignOut,
-  onOpenAddress,
 }: {
   profile: UserProfile;
   authConfigured: boolean;
@@ -103,7 +118,6 @@ export function ProfileControl({
   onChange: (profile: UserProfile) => Promise<void> | void;
   onSendOtp: (email: string) => Promise<void> | void;
   onSignOut: () => Promise<void> | void;
-  onOpenAddress?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<UserProfile>(() => normalizeProfile(profile));
@@ -300,8 +314,8 @@ export function ProfileControl({
 
   return (
     <>
-      <button ref={triggerRef} className={`profile-trigger liquid-glass ${hasAddress ? "has-address" : ""}`} type="button" onClick={() => setOpen(true)} aria-label="Открыть профиль">
-        <User size={19} />
+      <button ref={triggerRef} className={`profile-trigger liquid-glass ${hasAddress ? "has-address" : ""}`} type="button" onClick={() => setOpen(true)} aria-label={hasAddress ? `Адрес: ${profile.address}` : "Добавить адрес"}>
+        {hasAddress ? <MapPin size={19} /> : <User size={19} />}
       </button>
       {toast && <div className="profile-toast" role="status">{toast}</div>}
       {open && (
@@ -343,19 +357,6 @@ export function ProfileControl({
               <section className="profile-section" aria-labelledby="profile-address-title">
                 <h3 id="profile-address-title">Адрес доставки</h3>
                 <p className="profile-dialog-copy">Нужен для поиска товаров в ближайших магазинах.</p>
-                {onOpenAddress ? (
-                  <>
-                    <div className="profile-selected-store">
-                      <strong>{profile.address || "Адрес не указан"}</strong>
-                      {profile.lentaStoreName && <span>{profile.lentaStoreName}</span>}
-                    </div>
-                    <button className="secondary-button profile-location-button" type="button" onClick={() => {
-                      closeDialog();
-                      onOpenAddress();
-                    }}>Изменить адрес</button>
-                  </>
-                ) : (
-                  <>
                 <label htmlFor="profile-address">Адрес</label>
                 <div className="profile-address-control">
                   <input
@@ -427,8 +428,6 @@ export function ProfileControl({
                   Определить автоматически
                 </button>
                 {geoStatus !== "idle" && <p className="profile-dialog-copy" role="status">{geoStatusCopy[geoStatus]}</p>}
-                  </>
-                )}
               </section>
               <section className="profile-section" aria-labelledby="profile-household-title">
                 <div className="profile-section-heading">
@@ -573,28 +572,32 @@ function sameProfile(left: UserProfile, right: UserProfile) {
   return JSON.stringify(normalizeProfile(left)) === JSON.stringify(normalizeProfile(right));
 }
 
-export function Header({ route, address, onOpenAddress }: { route: "home" | "results"; address: string; onOpenAddress: () => void }) {
+export function Header({ route }: { route: "home" | "results" }) {
   if (route === "results") return null;
 
   return (
-    <header className="header task-header" data-od-id="app-header">
-      <button className="task-address" type="button" onClick={onOpenAddress} aria-label={`Адрес доставки: ${address}`}>
-        <span className="task-address__location"><MapPin size={18} aria-hidden="true" /><strong>{shortAddress(address)}</strong></span>
-        <span className="task-address__action">Изменить</span>
-      </button>
+    <header className="header vv-preview-header" data-od-id="app-header">
+      <div className="delivery-topbar">
+        <button className="icon-button topbar-button" type="button" aria-label="Поиск"><Search size={20} /></button>
+        <div className="delivery-location">
+          <span>Доставка</span>
+          <strong><MapPin size={14} /> Москва</strong>
+        </div>
+        <span aria-hidden="true" />
+      </div>
+      <div className="hero-offer">
+        <div>
+          <p className="brand-kicker vv-kicker">AI-планировщик корзины</p>
+          <h1 className="vv-title">Что купить сегодня?</h1>
+          <p className="header-copy vv-copy">Опишите задачу, а мы соберём три корзины с понятной ценой и заменами.</p>
+        </div>
+        <span className="hero-basket" aria-hidden="true">🥬</span>
+      </div>
     </header>
   );
 }
 
-function shortAddress(address: string) {
-  const parts = address.split(",").map((part) => part.trim()).filter(Boolean);
-  const street = parts.find((part) => /^(ул|улица|пр-т|проспект|пер|переулок)(?:\s|$)/i.test(part));
-  const house = parts.find((part) => /^(д|дом)(?:\s|$)/i.test(part));
-  if (street) return [street.replace(/^(ул|улица|пр-т|проспект|пер|переулок)\s*/i, ""), house?.replace(/^(д|дом)\s*/i, "")].filter(Boolean).join(", ");
-  return parts.slice(-2).join(", ") || "Указать адрес";
-}
-
-export function ConversationPanel({ planner, hasDeliveryAddress, retailers = [], onNeedsDelivery, draft, onDraftChange }: { planner: Planner; hasDeliveryAddress: boolean; retailers?: Retailer[]; onNeedsDelivery?: (request: string) => void; draft?: string; onDraftChange?: (request: string) => void }) {
+export function ConversationPanel({ planner, hasDeliveryAddress, onNeedsDelivery, draft, onDraftChange }: { planner: Planner; hasDeliveryAddress: boolean; onNeedsDelivery?: (request: string) => void; draft?: string; onDraftChange?: (request: string) => void }) {
   const [localText, setLocalText] = useState("");
   const text = draft ?? localText;
   const setText = (value: string | ((current: string) => string)) => {
@@ -602,91 +605,36 @@ export function ConversationPanel({ planner, hasDeliveryAddress, retailers = [],
     if (draft === undefined) setLocalText(next);
     onDraftChange?.(next);
   };
-  const clarifying = planner.state.stage === "clarifying" && Boolean(planner.state.intent?.clarificationQuestion);
-  const showMessages = !clarifying && (planner.state.messages.length > 1 || planner.state.stage === "error");
+  const showMessages = planner.state.messages.length > 1 || planner.state.stage === "clarifying" || planner.state.stage === "error";
   const busy = ["analyzing", "searching", "composing", "creatingCart"].includes(planner.state.stage);
   const submit = (value = text) => {
     void planner.submit(value);
+    setText("");
   };
-  const editRequest = () => {
-    setText(planner.state.pendingMessage ?? "");
-    planner.editRequest();
-    window.requestAnimationFrame(() => document.getElementById("basket-request")?.focus());
-  };
-  const errorAction = planner.state.error?.code === "retailer_unavailable" && onNeedsDelivery
-    ? { label: "Выбрать другой магазин", run: () => onNeedsDelivery(planner.state.pendingMessage ?? text) }
-    : planner.state.error && ["intent", "generation", "insufficient_products", "short_prompt"].includes(planner.state.error.code)
-      ? { label: "Изменить запрос", run: editRequest }
-      : { label: "Повторить", run: planner.retry };
 
   return (
     <section className="conversation-panel kit-home" aria-label="Подбор корзины" data-od-id="conversation-panel">
       {showMessages && <MessageList messages={planner.state.messages} />}
-      {clarifying ? (
-        <ClarificationStep
-          question={planner.state.intent!.clarificationQuestion!}
-          value={text}
-          onChange={setText}
-          onSubmit={submit}
-        />
-      ) : (
-        <>
-          <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} hasDeliveryAddress={hasDeliveryAddress} onNeedsDelivery={onNeedsDelivery} />
-          <PromptExamples onPick={setText} />
-        </>
-      )}
-      <RetailerContext retailers={retailers} />
+      <ChatComposer value={text} onChange={setText} onSubmit={() => submit()} busy={busy} hasDeliveryAddress={hasDeliveryAddress} onNeedsDelivery={onNeedsDelivery} />
+      <CategoryShortcuts onPick={(fragment) => setText((current) => appendBriefFragment(current, fragment))} />
       <IntentChips intent={planner.state.intent} />
-      {planner.state.error && <ErrorNotice message={planner.state.error.message} actionLabel={errorAction.label} onAction={errorAction.run} />}
+      {planner.state.error && <ErrorNotice message={planner.state.error.message} onRetry={planner.retry} />}
       <CatalogStatus mode={planner.state.catalogMode} onReconnect={planner.reconnectCatalog} />
+      <PromptExamples onPick={setText} />
     </section>
   );
 }
 
-function ClarificationStep({ question, value, onChange, onSubmit }: { question: string; value: string; onChange: (value: string) => void; onSubmit: (value?: string) => void }) {
-  const quickAnswers = clarificationAnswers(question);
-  const handleSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    if (value.trim()) onSubmit(value.trim());
-  };
-
+function CategoryShortcuts({ onPick }: { onPick: (fragment: string) => void }) {
   return (
-    <form className="clarification-step" onSubmit={handleSubmit}>
-      <p className="section-kicker">Уточним один момент</p>
-      <h1>{question}</h1>
-      {quickAnswers.length > 0 && (
-        <div className="clarification-answers" aria-label="Быстрые ответы">
-          {quickAnswers.map((answer) => (
-            <button key={answer.label} type="button" onClick={() => onSubmit(answer.value)}>{answer.label}</button>
-          ))}
-        </div>
-      )}
-      <label htmlFor="clarification-answer">Или ответьте своими словами</label>
-      <textarea id="clarification-answer" rows={2} value={value} onChange={(event) => onChange(event.target.value)} placeholder="Ваш ответ" />
-      <button className="primary-button" type="submit" disabled={!value.trim()}>Продолжить</button>
-    </form>
-  );
-}
-
-function clarificationAnswers(question: string) {
-  const normalized = question.toLocaleLowerCase("ru-RU");
-  if (/человек|сколько.*(персон|людей)/.test(normalized)) {
-    return [1, 2, 3, 4].map((people) => ({ label: people === 4 ? "4+" : String(people), value: `На ${people} человека` }));
-  }
-  if (/бюджет|сумм/.test(normalized)) {
-    return [1500, 3000, 5000].map((budget) => ({ label: `${budget.toLocaleString("ru-RU")} ₽`, value: `До ${budget} ₽` }));
-  }
-  return [];
-}
-
-function RetailerContext({ retailers }: { retailers: Retailer[] }) {
-  const available = retailers.filter((retailer) => retailer !== "demo");
-  if (!available.length) return null;
-  return (
-    <section className="home-retailers" aria-labelledby="home-retailers-title">
-      <h2 id="home-retailers-title">Магазины рядом</h2>
-      <div>{available.map((retailer) => <span key={retailer}>{retailerLabels[retailer]}</span>)}</div>
-    </section>
+    <div className="category-shortcuts" aria-label="Категории">
+      {categoryShortcuts.map((category) => (
+        <button key={category.label} type="button" onClick={() => onPick(category.fragment)}>
+          <span aria-hidden="true">{category.icon}</span>
+          {category.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -696,7 +644,7 @@ export function CatalogStatus({ mode, onReconnect }: { mode: "live" | "demo" | "
   return (
     <div className="catalog-status demo" aria-live="polite">
       <AlertTriangle size={17} />
-      <span>Показываем пример корзины. Можно сравнить состав или попробовать подключить каталог ещё раз.</span>
+      <span>Показываем пример корзины. Можно скопировать список или попробовать подключить каталог ещё раз.</span>
       <button type="button" onClick={onReconnect}><RefreshCw size={16} /> Повторить</button>
     </div>
   );
@@ -732,17 +680,19 @@ export function IntentChips({ intent }: { intent: Planner["state"]["intent"] }) 
 
 export function PromptExamples({ onPick }: { onPick: (value: string) => void }) {
   return (
-    <div className="examples" aria-label="Готовые задачи">
+    <div className="examples" aria-label="Готовые запросы">
       {examples.map((example) => (
         <button key={example.prompt} type="button" onClick={() => onPick(example.prompt)}>
           <span>{example.title}</span>
+          <small>{example.meta}</small>
         </button>
       ))}
     </div>
   );
 }
 
-export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddress, onNeedsDelivery }: { value: string; onChange: (value: string) => void; onSubmit: () => void; busy: boolean; hasDeliveryAddress: boolean; onNeedsDelivery?: (request: string) => void }) {
+export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddress, onNeedsDelivery, chips = briefChips, placeholder = "Например: ужины для двоих, без грибов", hint, submitLabel }: { value: string; onChange: (value: string) => void; onSubmit: () => void; busy: boolean; hasDeliveryAddress: boolean; onNeedsDelivery?: (request: string) => void; chips?: Array<{ label: string; fragment: string }>; placeholder?: string; hint?: string; submitLabel?: string }) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasText = value.trim().length > 0;
   const canSubmit = hasText && !busy;
   const handleSubmit = (event: FormEvent) => {
@@ -758,43 +708,60 @@ export function ChatComposer({ value, onChange, onSubmit, busy, hasDeliveryAddre
       else onNeedsDelivery?.(value.trim());
     }
   };
+  const addBriefChip = (fragment: string) => {
+    onChange(appendBriefFragment(value, fragment));
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   return (
     <form className="composer vv-chat-composer liquid-glass" onSubmit={handleSubmit}>
       <div className="composer-head">
-        <h1>Что собрать?</h1>
-        <p id="basket-request-hint">{hasDeliveryAddress ? "Опишите задачу обычными словами." : "Введите запрос — адрес добавим на следующем шаге."}</p>
+        <label htmlFor="basket-request">Что собрать?</label>
+        <p id="basket-request-hint">{hint ?? (!hasDeliveryAddress ? "Введите запрос — адрес добавим на следующем шаге." : "Добавьте срок, людей, бюджет или ограничения.")}</p>
+      </div>
+      <div className="brief-chips" aria-label="Быстро добавить параметры">
+        {chips.map((chip) => (
+          <button key={chip.fragment} type="button" onClick={() => addBriefChip(chip.fragment)}>
+            {chip.label}
+          </button>
+        ))}
       </div>
       <div className="composer-input-shell">
-        <label className="sr-only" htmlFor="basket-request">Что собрать?</label>
         <textarea
           id="basket-request"
+          ref={textareaRef}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Например, ужины на 3 дня для двоих до 3000 ₽ без грибов"
-          rows={5}
+          placeholder={placeholder}
+          rows={3}
           aria-describedby="basket-request-hint"
         />
-        <button type="submit" disabled={!canSubmit} aria-keyshortcuts="Control+Enter Meta+Enter">
+        <button type="submit" disabled={!canSubmit} aria-label={hasText ? (hasDeliveryAddress ? (submitLabel ?? "Подобрать 3 корзины") : "Продолжить") : "Введите задачу для подбора"} aria-keyshortcuts="Control+Enter Meta+Enter">
           {busy ? <Loader2 className="spin" size={18} /> : <ShoppingBasket size={18} />}
-          <span>{busy ? "Собираем..." : hasDeliveryAddress ? "Подобрать 3 варианта" : "Продолжить"}</span>
+          <span>{busy ? "Собираем..." : hasDeliveryAddress ? (submitLabel ?? "Подобрать 3 корзины") : "Продолжить"}</span>
         </button>
       </div>
     </form>
   );
 }
 
-export function BasketResults({ planner, deliveryAddress = "", showResultsHint = false, showBasketEditHint = false, onDismissResultsHint, onDismissBasketEditHint, onVariantOpen, onBasketEdit, onCheckoutClick, onStartNewSearch, onEditRequest }: { planner: Planner; deliveryAddress?: string; showResultsHint?: boolean; showBasketEditHint?: boolean; onDismissResultsHint?: () => void; onDismissBasketEditHint?: () => void; onVariantOpen?: (retailer?: string) => void; onBasketEdit?: (retailer?: string) => void; onCheckoutClick?: (retailer?: string) => void; onStartNewSearch?: () => void; onEditRequest?: () => void }) {
+function appendBriefFragment(value: string, fragment: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return fragment;
+  if (trimmed.toLocaleLowerCase("ru-RU").includes(fragment.toLocaleLowerCase("ru-RU"))) return value;
+  return `${trimmed}, ${fragment}`;
+}
+
+export function BasketResults({ planner, showResultsHint = false, showBasketEditHint = false, onDismissResultsHint, onDismissBasketEditHint, onVariantOpen, onBasketEdit, onCheckoutClick, onStartNewSearch }: { planner: Planner; showResultsHint?: boolean; showBasketEditHint?: boolean; onDismissResultsHint?: () => void; onDismissBasketEditHint?: () => void; onVariantOpen?: (retailer?: string) => void; onBasketEdit?: (retailer?: string) => void; onCheckoutClick?: (retailer?: string) => void; onStartNewSearch?: () => void }) {
   const [openedId, setOpenedId] = useState<string | null>(planner.state.selectedId);
   const [activeRetailer, setActiveRetailer] = useState<RetailerKey>(() => defaultRetailerKey(groupBasketVariants(planner.state.variants, planner.state.retailerResults)));
   const variants = planner.state.variants;
   const retailerGroups = useMemo(() => groupBasketVariants(variants, planner.state.retailerResults), [planner.state.retailerResults, variants]);
-  const availableGroups = retailerGroups.filter((group) => group.variants.length > 0);
-  const unavailableGroups = retailerGroups.filter((group) => group.variants.length === 0 && (group.result?.candidateCount ?? 0) > 0);
-  const activeGroup = availableGroups.find((group) => group.key === activeRetailer) ?? availableGroups[0];
+  const activeGroup = retailerGroups.find((group) => group.key === activeRetailer) ?? retailerGroups[0];
   const activeVariants = activeGroup?.variants ?? variants;
-  const storeAddress = activeVariants.flatMap((variant) => variant.items).find((item) => item.storeAddress)?.storeAddress ?? deliveryAddress;
   const selected = planner.state.variants.find((variant) => variant.id === openedId) ?? null;
+  const selectedPeerVariants = selected ? variants.filter((variant) => getRetailerKey(variant) === getRetailerKey(selected)) : variants;
   const openVariant = (id: string) => {
     const variant = planner.state.variants.find((item) => item.id === id);
     onVariantOpen?.(variant?.retailer);
@@ -808,10 +775,10 @@ export function BasketResults({ planner, deliveryAddress = "", showResultsHint =
   }, [openedId, planner.state.selectedId]);
 
   useEffect(() => {
-    if (availableGroups.length > 0 && !availableGroups.some((group) => group.key === activeRetailer)) {
-      setActiveRetailer(availableGroups[0].key);
+    if (retailerGroups.length > 0 && !retailerGroups.some((group) => group.key === activeRetailer)) {
+      setActiveRetailer(retailerGroups[0].key);
     }
-  }, [activeRetailer, availableGroups]);
+  }, [activeRetailer, retailerGroups]);
 
   if (selected) {
     return (
@@ -830,9 +797,11 @@ export function BasketResults({ planner, deliveryAddress = "", showResultsHint =
         </ContextHint>}
         <SelectedBasketActions
           variant={selected}
+          variants={selectedPeerVariants}
           mode={planner.state.catalogMode}
           creating={planner.state.stage === "creatingCart"}
           onItems={(items) => { onBasketEdit?.(selected.retailer); planner.updateItems(selected.id, items); }}
+          onReplace={(xmlId) => { onBasketEdit?.(selected.retailer); planner.replaceItem(selected.id, xmlId); }}
           onCreateCart={planner.createCart}
           onCheckoutClick={() => onCheckoutClick?.(selected.retailer)}
         />
@@ -842,26 +811,22 @@ export function BasketResults({ planner, deliveryAddress = "", showResultsHint =
 
   return (
     <section className="results-panel kit-results" aria-label="Варианты корзины" data-od-id="results-panel">
-      <header className="compare-header">
-        <a className="section-kicker results-home-link" href="/" aria-label="На главную" onClick={onStartNewSearch ? (event) => { event.preventDefault(); onStartNewSearch(); } : undefined}>
-          <ChevronLeft size={16} aria-hidden="true" />
-          На главную
-        </a>
-        <div className="compare-request">
-          <p className="section-kicker">Ваш запрос</p>
-          <h1>{planner.state.intent?.originalRequest ?? "Три варианта корзины"}</h1>
-          {planner.state.intent && <p className="compare-request-summary">{summarizeIntentSlots(planner.state.intent).join(" · ")}</p>}
-          {activeGroup && <p className="compare-store-context"><MapPin size={16} aria-hidden="true" /> {retailerLabels[activeGroup.key]}{storeAddress ? ` · ${storeAddress}` : ""}</p>}
+      <header className="section-heading compact-heading">
+        <div>
+          <a className="section-kicker results-home-link" href="/" aria-label="На главную" onClick={onStartNewSearch ? (event) => { event.preventDefault(); onStartNewSearch(); } : undefined}>
+            <ChevronLeft size={16} aria-hidden="true" />
+            На главную
+          </a>
+          <h2>3 сценария доставки</h2>
         </div>
-        {onEditRequest && <button className="secondary-button compare-edit-request" type="button" onClick={onEditRequest}>Изменить запрос</button>}
       </header>
       {showResultsHint && <ContextHint onDismiss={onDismissResultsHint}>
         <strong>Готово. Мы собрали несколько способов решить вашу задачу.</strong> У вариантов разные приоритеты: цена, баланс состава и минимум готовки. Откройте любую корзину, чтобы посмотреть товары и изменить состав.
       </ContextHint>}
       {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
-      {availableGroups.length > 1 && (
+      {retailerGroups.length > 1 && (
         <div className="retailer-tabs" role="tablist" aria-label="Магазин">
-          {availableGroups.map((group) => (
+          {retailerGroups.map((group) => (
             <button
               key={group.key}
               type="button"
@@ -875,16 +840,13 @@ export function BasketResults({ planner, deliveryAddress = "", showResultsHint =
           ))}
         </div>
       )}
-      {unavailableGroups.length > 0 && (
-        <div className="retailer-unavailable-list" aria-label="Недоступные магазины">
-          {unavailableGroups.map((group) => <p key={group.key}>{retailerLabels[group.key]}: {group.result?.message ?? "сейчас недостаточно товаров для трёх вариантов"}</p>)}
-        </div>
-      )}
       <div className="variant-list compare-list" data-od-id="variant-grid">
         {activeVariants.length > 0 ? activeVariants.map((variant) => (
           <BasketVariantCard
             key={variant.id}
             variant={variant}
+            recommended={variant.strategy === "balanced"}
+            variants={activeVariants}
             onSelect={() => openVariant(variant.id)}
           />
         )) : (
@@ -912,6 +874,19 @@ function RetailerEmptyState({ group }: { group?: { key: RetailerKey; result?: Re
       <p>{message}</p>
       {group?.result && <span>Кандидатов: {group.result.candidateCount}</span>}
     </div>
+  );
+}
+
+export function EmptyResultsState({ onStart }: { onStart: () => void }) {
+  return (
+    <section className="results-panel empty-results-panel" aria-label="Подборка не найдена" data-od-id="empty-results-panel">
+      <div className="empty-state liquid-glass">
+        <ShoppingBasket aria-hidden="true" />
+        <h2>Подборка не найдена</h2>
+        <p>Здесь появятся варианты корзины после запроса. Можно вернуться и собрать новую умную корзину.</p>
+        <button className="primary-button" type="button" onClick={onStart}>Собрать корзину</button>
+      </div>
+    </section>
   );
 }
 
@@ -956,7 +931,7 @@ function groupBasketVariants(variants: BasketVariant[], retailerResults: Retaile
   return order.flatMap((key) => {
     const group = grouped.get(key);
     const result = resultMap.get(key);
-    return group || result ? [{ key, variants: group ?? [], result }] : [];
+    return group || result || key !== "demo" ? [{ key, variants: group ?? [], result }] : [];
   });
 }
 
@@ -964,19 +939,18 @@ function defaultRetailerKey(groups: Array<{ key: RetailerKey; variants: BasketVa
   return groups.find((group) => group.variants.length > 0)?.key ?? groups[0]?.key ?? "demo";
 }
 
-export function BasketVariantCard({ variant, onSelect }: { variant: BasketVariant; onSelect: () => void }) {
-  const presentation = getVariantPresentation(variant);
-  const selectionLabel = variant.strategy === "economy" ? "Выбрать экономную" : variant.strategy === "fast" ? "Выбрать быструю" : "Выбрать сбалансированную";
+export function BasketVariantCard({ variant, recommended, variants, onSelect }: { variant: BasketVariant; recommended: boolean; variants: BasketVariant[]; onSelect: () => void }) {
+  const presentation = getVariantPresentation(variant, variants);
 
   return (
     <article className="variant-card vv-basket-variant-card" data-od-id={`variant-card-${variant.id}`}>
-      <button className="variant-card-button" type="button" onClick={onSelect} aria-label={selectionLabel}>
+      <button className="variant-card-button" type="button" onClick={onSelect} aria-label={`Открыть корзину ${variant.title}`}>
         <div className="variant-card-top">
           <div>
             <h2>{presentation.title}</h2>
             <small>{presentation.subtitle}</small>
           </div>
-          {presentation.recommendationLabel && <strong className="recommend-badge">{presentation.recommendationLabel}</strong>}
+          {recommended && presentation.recommendationLabel && <strong className="recommend-badge">{presentation.recommendationLabel}</strong>}
         </div>
         <strong className="price">{variant.totalRub.toLocaleString("ru-RU")} ₽</strong>
         <div className="variant-compare-line">
@@ -984,17 +958,17 @@ export function BasketVariantCard({ variant, onSelect }: { variant: BasketVarian
           <span>{presentation.cookingLabel}</span>
           <span>{presentation.priceDeltaLabel}</span>
         </div>
-        <p className="variant-difference">{presentation.tradeoffText}</p>
-        <ul className="variant-preview-list" aria-label="Примеры товаров">
+        <ul className="variant-preview-list" aria-label="В составе">
           {presentation.previewItems.map((name) => <li key={name}>{name}</li>)}
         </ul>
-        <span className="variant-card-action">{selectionLabel}</span>
+        <p className="variant-difference">{presentation.tradeoffText}</p>
+        <span className="variant-card-action">Открыть</span>
       </button>
     </article>
   );
 }
 
-export function BasketItemRow({ item, priceStatus, onQuantity, onDelete }: { item: BasketItem; priceStatus: string | null; onQuantity: (quantity: number) => void; onDelete: () => void }) {
+export function BasketItemRow({ item, onQuantity, onDelete, onReplace }: { item: BasketItem; onQuantity: (quantity: number) => void; onDelete: () => void; onReplace: () => void }) {
   return (
     <div className="basket-row vv-basket-item-row">
       <ProductThumb item={item} />
@@ -1002,7 +976,7 @@ export function BasketItemRow({ item, priceStatus, onQuantity, onDelete }: { ite
         <strong>{item.name}</strong>
         {item.retailer === "lenta" && item.storeName && <span>Лента · {item.storeName}{item.storeAddress ? `, ${item.storeAddress}` : ""}</span>}
         <span>{item.weightLabel ?? roleLabels[item.role] ?? "Продукт"}</span>
-        {priceStatus && <span>{priceStatus}</span>}
+        {item.priceObservedAt && <span>Цена проверена: {formatObservedAt(item.priceObservedAt)}</span>}
         {item.availability === "unavailable" && <span>Нет в наличии</span>}
       </div>
       <div className="basket-row-actions">
@@ -1011,11 +985,18 @@ export function BasketItemRow({ item, priceStatus, onQuantity, onDelete }: { ite
           <b>{item.quantity}</b>
           <button type="button" onClick={() => onQuantity(item.quantity + 1)} disabled={item.quantity >= 9} aria-label="Увеличить"><Plus size={16} /></button>
         </div>
+        <button type="button" className="secondary-button replace-button" onClick={onReplace}>Заменить</button>
         <button type="button" className="icon-button" onClick={onDelete} aria-label="Удалить"><Trash2 size={17} /></button>
       </div>
       <b className="row-price">{Math.round(item.priceRub * item.quantity).toLocaleString("ru-RU")} ₽</b>
     </div>
   );
+}
+
+function formatObservedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
 function ProductThumb({ item }: { item: BasketItem }) {
@@ -1030,20 +1011,15 @@ function ProductThumb({ item }: { item: BasketItem }) {
   );
 }
 
-export function SelectedBasketActions({ variant, mode, creating, onItems, onCreateCart, onCheckoutClick }: { variant: BasketVariant; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onCreateCart: () => Promise<CheckoutResult | null>; onCheckoutClick?: () => void }) {
+export function SelectedBasketActions({ variant, variants, mode, creating, onItems, onReplace, onCreateCart, onCheckoutClick }: { variant: BasketVariant; variants: BasketVariant[]; mode: "live" | "demo" | "connecting"; creating: boolean; onItems: (items: BasketItem[]) => void; onReplace: (xmlId: string) => void; onCreateCart: () => Promise<CheckoutResult | null>; onCheckoutClick?: () => void }) {
   const [cartUrl, setCartUrl] = useState<string | null>(null);
   const [lentaCopyStatus, setLentaCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [removed, setRemoved] = useState<BasketItem | null>(null);
-  const presentation = getVariantPresentation(variant);
+  const presentation = getVariantPresentation(variant, variants);
   const retailer = variant.retailer ?? variant.items[0]?.retailer;
   const isLenta = retailer === "lenta";
-  const firstItem = variant.items[0];
-  const storeContext = [retailer ? retailerLabels[retailer] : null, firstItem?.storeName, firstItem?.storeAddress].filter(Boolean).join(" · ");
-  const commitItems = (items: BasketItem[]) => {
-    setCartUrl(null);
-    setLentaCopyStatus("idle");
-    onItems(items);
-  };
+  const list = useMemo(() => formatBasketList(variant.items), [variant.items]);
+  const copy = () => void navigator.clipboard.writeText(list);
   const checkout = async () => {
     onCheckoutClick?.();
     const result = await onCreateCart();
@@ -1058,14 +1034,14 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
     }
     setCartUrl(result.url);
   };
-  const update = (xmlId: string, quantity: number) => commitItems(variant.items.map((item) => item.xmlId === xmlId ? { ...item, quantity: Math.min(9, Math.max(1, quantity)) } : item));
+  const update = (xmlId: string, quantity: number) => onItems(variant.items.map((item) => item.xmlId === xmlId ? { ...item, quantity: Math.min(9, Math.max(1, quantity)) } : item));
   const remove = (item: BasketItem) => {
     setRemoved(item);
-    commitItems(variant.items.filter((current) => current.xmlId !== item.xmlId));
+    onItems(variant.items.filter((current) => current.xmlId !== item.xmlId));
   };
   const undoRemove = () => {
     if (!removed) return;
-    commitItems([...variant.items, removed]);
+    onItems([...variant.items, removed]);
     setRemoved(null);
   };
 
@@ -1074,25 +1050,24 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
       <section className="selected-basket vv-selected-basket" data-od-id="selected-basket">
         <div className="section-heading">
           <div>
-            <p className="section-kicker">Корзина</p>
-            <h2>{presentation.title} корзина</h2>
+            <p className="section-kicker">Checkout</p>
+            <h2>{presentation.title}</h2>
             <p>{variant.totalRub.toLocaleString("ru-RU")} ₽ · {variant.uniqueItemsCount} позиций</p>
-            <p>{presentation.coverageLabel}</p>
-            {storeContext && <p className="basket-store-context"><MapPin size={16} aria-hidden="true" /> {storeContext}</p>}
           </div>
+          <button className="secondary-button" type="button" onClick={copy}><Copy size={17} /> Скопировать</button>
         </div>
         <div className="rows">
           {variant.items.map((item) => (
             <BasketItemRow
               key={item.xmlId}
               item={item}
-              priceStatus={basketPriceStatus(variant, item)}
               onQuantity={(quantity) => update(item.xmlId, quantity)}
               onDelete={() => remove(item)}
+              onReplace={() => onReplace(item.xmlId)}
             />
           ))}
         </div>
-        {removed && <div className="basket-toast" role="status"><span>Товар удалён ·</span><button type="button" onClick={undoRemove}>Вернуть</button></div>}
+        {removed && <button className="secondary-button undo-button" type="button" onClick={undoRemove}>Вернуть {removed.name}</button>}
         {variant.warnings.length > 0 && (
           <ul className="variant-warnings" aria-label="Предупреждения по корзине">
             {variant.warnings.map((warning) => <li key={warning}>{warning}</li>)}
@@ -1100,10 +1075,10 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
         )}
         {isLenta && lentaCopyStatus !== "idle" && (
           <p className="demo-note" role="status">
-            {lentaCopyStatus === "copied" ? "Список проверен и скопирован. В Ленте добавьте товары вручную." : "Список проверен, но не скопирован. Добавьте товары в Ленте вручную."}
+            {lentaCopyStatus === "copied" ? "Список проверен и скопирован. В Ленте добавьте товары вручную." : "Список проверен. Скопируйте его кнопкой выше и добавьте товары в Ленте вручную."}
           </p>
         )}
-        {mode === "demo" && <p className="demo-note">Это пример корзины: цены и товары нужны для ориентира, оформление недоступно.</p>}
+        {mode === "demo" && <p className="demo-note">Это пример корзины: цены и товары нужны для ориентира. Список можно скопировать.</p>}
       </section>
       <CheckoutBar
         totalRub={variant.totalRub}
@@ -1118,10 +1093,35 @@ export function SelectedBasketActions({ variant, mode, creating, onItems, onCrea
   );
 }
 
+function BottomNav({ route }: { route: "home" | "results" }) {
+  return (
+    <nav className="bottom-nav" aria-label="Основная навигация">
+      <a aria-current={route === "home" ? "page" : undefined} href="/">
+        <Home size={18} />
+        <span>Главная</span>
+      </a>
+      <a aria-current={route === "results" ? "page" : undefined} href="/results">
+        <ShoppingBasket size={18} />
+        <span>Корзина</span>
+      </a>
+      <button className="bottom-fab" type="button" aria-label="Быстрый подбор">
+        <Gift size={22} />
+      </button>
+      <a href="/">
+        <Heart size={18} />
+        <span>Любимое</span>
+      </a>
+      <a href="/">
+        <Menu size={18} />
+        <span>Ещё</span>
+      </a>
+    </nav>
+  );
+}
+
 function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, retailer, onCreateCart }: { totalRub: number; itemCount: number; mode: "live" | "demo" | "connecting"; creating: boolean; cartUrl: string | null; retailer?: BasketVariant["retailer"]; onCreateCart: () => Promise<void> }) {
   const label = `${totalRub.toLocaleString("ru-RU")} ₽`;
   const isLenta = retailer === "lenta";
-  const supported = retailer === "vkusvill" || isLenta;
 
   return (
     <div className="checkout-bar vv-checkout-bar liquid-glass">
@@ -1129,35 +1129,29 @@ function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, retailer, o
         <strong>{label}</strong>
         <span>{itemCount} позиций</span>
       </div>
-      {mode === "demo" || !supported ? (
-        <button className="primary-button checkout-button" type="button" disabled>{retailer ? `${retailerLabels[retailer]} пока недоступна` : "Оформление недоступно"}</button>
+      {mode === "demo" ? (
+        <button className="primary-button checkout-button" type="button" disabled>{isLenta ? "Лента недоступна" : "ВкусВилл недоступен"}</button>
       ) : cartUrl ? (
         <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> {isLenta ? "Открыть Ленту" : "Открыть во ВкусВилл"}</a>
       ) : (
         <button className="primary-button checkout-button" type="button" disabled={creating} onClick={onCreateCart}>
-          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} {isLenta ? "Проверить список в Ленте" : "Открыть во ВкусВилл"}
+          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} {isLenta ? "Проверить список Ленты" : "Открыть во ВкусВилл"}
         </button>
       )}
     </div>
   );
 }
 
-function basketPriceStatus(variant: BasketVariant, item: BasketItem) {
-  if (["partial", "failed", "stale"].includes(variant.validation.status)) return "Цена могла измениться";
-  if (variant.validation.status === "validated" || item.priceObservedAt) return "Цена актуальна";
-  return null;
-}
-
 function formatBasketList(items: BasketItem[]) {
   return items.map((item) => `${item.quantity} × ${item.name} — ${Math.round(item.priceRub * item.quantity)} ₽`).join("\n");
 }
 
-export function ErrorNotice({ message, actionLabel, onAction }: { message: string; actionLabel: string; onAction: () => void }) {
+export function ErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="error-notice" aria-live="polite">
       <AlertTriangle size={18} />
       <span>{message}</span>
-      <button type="button" onClick={onAction}><RefreshCw size={16} /> {actionLabel}</button>
+      <button type="button" onClick={onRetry}><RefreshCw size={16} /> Повторить</button>
     </div>
   );
 }
@@ -1166,7 +1160,7 @@ export function DemoModeBanner({ onReconnect }: { onReconnect: () => void }) {
   return (
     <div className="demo-banner">
       <AlertTriangle size={18} />
-      <span>Каталог не ответил, поэтому показываем пример для сравнения.</span>
+      <span>Каталог не ответил, поэтому показываем пример. Его можно открыть, сравнить и скопировать.</span>
       <button type="button" onClick={onReconnect}>Повторить</button>
     </div>
   );

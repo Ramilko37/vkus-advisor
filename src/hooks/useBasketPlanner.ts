@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import type { AppError, BasketIntent, BasketItem, BasketValidation, BasketVariant, CatalogClient, ChatMessage, CheckoutResult, NormalizedProduct, PipelineMetrics, Retailer, RetailerResult, UserProfile, WorkflowStage } from "../types/domain";
+import type { AppError, BasketIntent, BasketItem, BasketVariant, CatalogClient, ChatMessage, CheckoutResult, NormalizedProduct, PipelineMetrics, RetailerResult, UserProfile, WorkflowStage } from "../types/domain";
 import { analyzeIntent, basketSummary, composeBaskets } from "../services/basketOrchestrator";
 import { BrowserLlmClient, LlmProviderError, getSessionId } from "../services/openRouterClient";
 import { createCatalogClient } from "../services/catalog";
@@ -8,8 +8,6 @@ import { measureStage } from "../services/pipelineMetrics";
 import { validateBasketRequest } from "../services/requestCopy";
 import { replaceBasketItem } from "../services/basketEditing";
 import { DEFAULT_PROFILE } from "../services/profileRepository";
-import { scoreBasketVariants } from "../services/basketValidation";
-import { basketCompareResponseSchema, basketIntentSchema, persistedBasketCompareResponseSchema } from "../schemas";
 
 interface PlannerState {
   stage: WorkflowStage;
@@ -37,13 +35,13 @@ type Action =
   | { type: "intent"; intent: BasketIntent }
   | { type: "ready"; intent: BasketIntent; variants: BasketVariant[]; retailerResults: RetailerResult[]; models: string[] }
   | { type: "select"; id: string | null }
-  | { type: "items"; id: string; items: BasketItem[]; validation?: BasketValidation }
+  | { type: "items"; id: string; items: BasketItem[] }
   | { type: "error"; error: AppError; pendingMessage?: string }
   | { type: "clearError" }
   | { type: "reset" };
 
 const RESULTS_STORAGE_KEY = "vkusvill-advisor:last-results";
-const RESULTS_SCHEMA_VERSION = 13;
+const RESULTS_SCHEMA_VERSION = 10;
 
 function createInitialState(): PlannerState {
   return {
@@ -65,9 +63,7 @@ function reducer(state: PlannerState, action: Action): PlannerState {
     case "catalog":
       return { ...state, catalogMode: action.mode };
     case "stage":
-      return action.stage === "analyzing"
-        ? { ...state, stage: action.stage, variants: [], retailerResults: [], selectedId: null, error: null }
-        : { ...state, stage: action.stage, error: null };
+      return { ...state, stage: action.stage, error: null };
     case "message":
       return { ...state, messages: [...state.messages, action.message] };
     case "intent":
@@ -77,15 +73,11 @@ function reducer(state: PlannerState, action: Action): PlannerState {
     case "select":
       return { ...state, selectedId: action.id };
     case "items":
-      return { ...state, variants: state.intent ? scoreBasketVariants(state.variants.map((variant) => variant.id === action.id ? recalculate({
-        ...variant,
-        items: action.items,
-        validation: action.validation ?? (variant.retailer === "lenta" ? { status: "stale", checkedAt: null } : variant.validation),
-      }) : variant), state.intent) : state.variants };
+      return { ...state, variants: state.variants.map((variant) => variant.id === action.id ? recalculate({ ...variant, items: action.items }) : variant) };
     case "error":
       return { ...state, stage: "error", error: action.error, pendingMessage: action.pendingMessage ?? state.pendingMessage };
     case "clearError":
-      return { ...state, stage: "idle", error: null };
+      return { ...state, error: null };
     case "reset":
       return { ...createInitialState(), catalogMode: state.catalogMode };
     default:
@@ -93,13 +85,10 @@ function reducer(state: PlannerState, action: Action): PlannerState {
   }
 }
 
-export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retailers?: Retailer[]) {
-  const retailerKey = retailers?.join(",") ?? "";
-  const catalogContext = profileCatalogKey(profile, retailers);
-  const [state, dispatch] = useReducer(reducer, catalogContext, restorePlannerState);
+export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
+  const [state, dispatch] = useReducer(reducer, undefined, restorePlannerState);
   const catalogRef = useRef<CatalogClient | null>(null);
   const catalogProfileKeyRef = useRef("");
-  const previousCatalogContextRef = useRef(catalogContext);
   const candidatePoolRef = useRef<CandidatePool | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -108,29 +97,20 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
   const { catalogMode, intent, modelNames, retailerResults, selectedId, variants } = state;
 
   useEffect(() => {
-    if (previousCatalogContextRef.current !== catalogContext) return;
-    persistPlannerState({ catalogMode, intent, modelNames, retailerResults, selectedId, variants }, catalogContext);
-  }, [catalogContext, catalogMode, intent, modelNames, retailerResults, selectedId, variants]);
+    persistPlannerState({ catalogMode, intent, modelNames, retailerResults, selectedId, variants });
+  }, [catalogMode, intent, modelNames, retailerResults, selectedId, variants]);
 
   useEffect(() => {
-    if (previousCatalogContextRef.current === catalogContext) return;
-    abortRef.current?.abort();
-    abortRef.current = null;
-    activeRequestIdRef.current = null;
     catalogRef.current = null;
     catalogProfileKeyRef.current = "";
     candidatePoolRef.current = null;
-    previousCatalogContextRef.current = catalogContext;
-    sessionStorage.removeItem(RESULTS_STORAGE_KEY);
-    dispatch({ type: "reset" });
-  }, [catalogContext]);
+  }, [profile]);
 
   const runWorkflow = useCallback(async (message: string) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     const requestId = crypto.randomUUID();
     const startedAt = performance.now();
-    let failedStage: WorkflowStage = "analyzing";
     activeRequestIdRef.current = requestId;
     abortRef.current = controller;
     const isActive = () => activeRequestIdRef.current === requestId;
@@ -175,17 +155,13 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
         dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "assistant", content: intentResult.data.clarificationQuestion, createdAt: Date.now() } });
         return;
       }
-      failedStage = "searching";
       dispatch({ type: "stage", stage: "searching" });
-      const catalog = await getCatalogForProfile(catalogRef, catalogProfileKeyRef, profile, retailers, controller.signal);
-      if (!isActive()) return;
+      const catalog = await getCatalogForProfile(catalogRef, catalogProfileKeyRef, profile, controller.signal);
       dispatch({ type: "catalog", mode: catalog.mode });
-      failedStage = "composing";
       dispatch({ type: "stage", stage: "composing" });
       const fingerprint = buildCatalogFingerprint(intentResult.data, profile.address);
       const reusablePool = candidatePoolRef.current?.intentFingerprint === fingerprint ? candidatePoolRef.current.products : undefined;
       const measuredBasket = await measureStage(() => composeBaskets(intentResult.data, catalog, llm, sessionId, controller.signal, reusablePool));
-      if (!isActive()) return;
       const result = measuredBasket.result;
       metrics.basketMs = measuredBasket.durationMs - result.catalogSearchMs;
       metrics.catalogSearchMs = result.catalogSearchMs;
@@ -202,25 +178,21 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
       metrics.catalogReused = result.catalogReused;
       metrics.fallbackModelUsed = metrics.fallbackModelUsed || result.basketFallbackModelUsed;
       candidatePoolRef.current = { intentFingerprint: fingerprint, products: result.candidates, createdAt: Date.now() };
+      if (!isActive()) return;
       dispatch({ type: "ready", intent: result.intent, variants: result.variants, retailerResults: result.retailerResults, models: [intentResult.model, ...result.models] });
       dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "assistant", content: "Готово: собрал три варианта корзины. Выберите подходящий и проверьте состав товаров перед оформлением.", createdAt: Date.now() } });
       metrics.totalMs = Math.round(performance.now() - startedAt);
       console.info("pipeline_metrics", metrics);
     } catch (error) {
       if (!isActive()) return;
-      const appError = toAppError(error, failedStage);
+      const appError = toAppError(error);
       dispatch({ type: "error", error: appError, pendingMessage: message });
-    } finally {
-      if (isActive()) {
-        activeRequestIdRef.current = null;
-        abortRef.current = null;
-      }
     }
-  }, [llm, profile, retailerKey, retailers, sessionId, state]);
+  }, [llm, profile, sessionId, state]);
 
   const submit = useCallback(async (message: string) => {
     const trimmed = message.trim();
-    if (!trimmed || activeRequestIdRef.current) return;
+    if (!trimmed) return;
     const validationError = state.intent ? null : validateBasketRequest(trimmed);
     if (validationError) {
       dispatch({ type: "error", error: { source: "validation", code: "short_prompt", message: validationError, recoverable: true }, pendingMessage: trimmed });
@@ -244,11 +216,11 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
 
   const reconnectCatalog = useCallback(async () => {
     dispatch({ type: "catalog", mode: "connecting" });
-    const catalog = retailers ? await createCatalogClient(profile, undefined, retailers) : await createCatalogClient(profile);
+    const catalog = await createCatalogClient(profile);
     catalogRef.current = catalog;
-    catalogProfileKeyRef.current = profileCatalogKey(profile, retailers);
+    catalogProfileKeyRef.current = profileCatalogKey(profile);
     dispatch({ type: "catalog", mode: catalog.mode });
-  }, [profile, retailerKey, retailers]);
+  }, [profile]);
 
   const mockResults = useCallback(() => {
     abortRef.current?.abort();
@@ -260,13 +232,13 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
   const createCart = useCallback(async (): Promise<CheckoutResult | null> => {
     const variant = selectedVariant(state);
     if (!variant) return null;
-    const isLenta = variant.retailer === "lenta";
+    const isLenta = variant.retailer === "lenta" || variant.items.every((item) => item.retailer === "lenta");
     try {
       let catalog = catalogRef.current;
-      const catalogKey = profileCatalogKey(profile, retailers);
+      const catalogKey = profileCatalogKey(profile);
       if (!catalog || catalogProfileKeyRef.current !== catalogKey) {
         dispatch({ type: "catalog", mode: "connecting" });
-        catalog = retailers ? await createCatalogClient(profile, undefined, retailers) : await createCatalogClient(profile);
+        catalog = await createCatalogClient(profile);
         catalogRef.current = catalog;
         catalogProfileKeyRef.current = catalogKey;
         dispatch({ type: "catalog", mode: catalog.mode });
@@ -276,21 +248,13 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
       if (isLenta) {
         if (!catalog.validateBasketItems) throw new Error("Lenta basket validation is unavailable");
         const validation = await catalog.validateBasketItems(variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity, priceRub: item.priceRub })));
+        if (validation.unavailableXmlIds.length > 0) throw new Error("Some Lenta basket items are unavailable");
         const products = new Map(validation.products.map((product) => [product.xmlId, product]));
-        if (validation.unavailableXmlIds.length > 0 || variant.items.some((item) => !products.has(item.xmlId))) {
-          throw new Error("Some Lenta basket items could not be validated");
-        }
         const items = variant.items.map((item) => {
           const product = products.get(item.xmlId);
           return product ? { ...item, ...product, quantity: item.quantity, role: item.role, reason: item.reason } : item;
         });
-        const observedAt = validation.products.map((product) => product.priceObservedAt).filter((value): value is string => Boolean(value)).sort();
-        dispatch({
-          type: "items",
-          id: variant.id,
-          items,
-          validation: { status: "validated", checkedAt: observedAt[observedAt.length - 1] ?? new Date().toISOString() },
-        });
+        dispatch({ type: "items", id: variant.id, items });
         dispatch({ type: "stage", stage: "ready" });
         return { url: "https://lenta.com/basket/", items };
       }
@@ -298,17 +262,15 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
       dispatch({ type: "stage", stage: "ready" });
       return { url };
     } catch {
-      if (isLenta) dispatch({ type: "items", id: variant.id, items: variant.items, validation: { status: "failed", checkedAt: null } });
       dispatch({ type: "error", error: { source: "mcp", code: "cart", message: isLenta ? "Не удалось проверить товары Ленты. Обновите корзину или попробуйте позже." : "Не удалось создать ссылку. Список товаров можно скопировать и использовать вручную.", recoverable: true } });
       return null;
     }
-  }, [profile, retailerKey, retailers, state]);
+  }, [profile, state]);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
-    abortRef.current = null;
     activeRequestIdRef.current = null;
-    dispatch({ type: "stage", stage: "canceled" });
+    dispatch({ type: "stage", stage: "idle" });
   }, []);
 
   const reset = useCallback(() => {
@@ -319,8 +281,6 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
     sessionStorage.removeItem(RESULTS_STORAGE_KEY);
     dispatch({ type: "reset" });
   }, []);
-
-  const editRequest = useCallback(() => dispatch({ type: "clearError" }), []);
 
   const replaceItem = useCallback((variantId: string, xmlId: string) => {
     const variant = state.variants.find((item) => item.id === variantId);
@@ -337,7 +297,6 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
     mockResults,
     createCart,
     cancel,
-    editRequest,
     reset,
     replaceItem,
     selectVariant: (id: string) => dispatch({ type: "select", id }),
@@ -346,17 +305,14 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE, retaile
   };
 }
 
-function restorePlannerState(catalogContext: string): PlannerState {
+function restorePlannerState(): PlannerState {
   const initial = createInitialState();
   try {
     const raw = sessionStorage.getItem(RESULTS_STORAGE_KEY);
     if (!raw) return initial;
-    const saved = JSON.parse(raw) as Partial<PlannerState> & { schemaVersion?: number; catalogContext?: string };
-    if (saved.schemaVersion !== RESULTS_SCHEMA_VERSION || saved.catalogContext !== catalogContext) return initial;
-    const parsedIntent = basketIntentSchema.safeParse(saved.intent);
-    const parsedCompare = persistedBasketCompareResponseSchema.safeParse({ variants: saved.variants });
-    if (!parsedIntent.success || !parsedCompare.success || isStaleRetailerResult({ ...saved, variants: parsedCompare.data.variants })) return initial;
-    const selectedId = typeof saved.selectedId === "string" && parsedCompare.data.variants.some((variant) => variant.id === saved.selectedId) ? saved.selectedId : null;
+    const saved = JSON.parse(raw) as Partial<PlannerState> & { schemaVersion?: number };
+    if (saved.schemaVersion !== RESULTS_SCHEMA_VERSION || !Array.isArray(saved.variants) || saved.variants.length === 0 || !saved.intent || isStaleRetailerResult(saved)) return initial;
+    const selectedId = typeof saved.selectedId === "string" && saved.variants.some((variant) => variant.id === saved.selectedId) ? saved.selectedId : null;
     return {
       ...initial,
       stage: "ready",
@@ -364,8 +320,8 @@ function restorePlannerState(catalogContext: string): PlannerState {
         ...initial.messages,
         { id: crypto.randomUUID(), role: "assistant", createdAt: Date.now(), content: "Вернул последнюю подборку. Можно выбрать вариант или собрать новую корзину." },
       ],
-      intent: parsedIntent.data,
-      variants: parsedCompare.data.variants,
+      intent: saved.intent,
+      variants: saved.variants,
       retailerResults: normalizeRetailerResults(saved.retailerResults),
       selectedId,
       catalogMode: saved.catalogMode === "live" || saved.catalogMode === "demo" ? saved.catalogMode : "demo",
@@ -376,15 +332,11 @@ function restorePlannerState(catalogContext: string): PlannerState {
   }
 }
 
-function persistPlannerState(state: Pick<PlannerState, "catalogMode" | "intent" | "modelNames" | "retailerResults" | "selectedId" | "variants">, catalogContext: string) {
+function persistPlannerState(state: Pick<PlannerState, "catalogMode" | "intent" | "modelNames" | "retailerResults" | "selectedId" | "variants">) {
   try {
-    if (!state.intent || state.variants.length === 0 || isStaleRetailerResult(state)) {
-      sessionStorage.removeItem(RESULTS_STORAGE_KEY);
-      return;
-    }
+    if (!state.intent || state.variants.length === 0 || isStaleRetailerResult(state)) return;
     sessionStorage.setItem(RESULTS_STORAGE_KEY, JSON.stringify({
       schemaVersion: RESULTS_SCHEMA_VERSION,
-      catalogContext,
       intent: state.intent,
       variants: state.variants,
       retailerResults: state.retailerResults,
@@ -402,19 +354,18 @@ async function getCatalogForProfile(
   catalogRef: { current: CatalogClient | null },
   catalogProfileKeyRef: { current: string },
   profile: UserProfile,
-  retailers?: Retailer[],
   signal?: AbortSignal,
 ) {
-  const catalogKey = profileCatalogKey(profile, retailers);
+  const catalogKey = profileCatalogKey(profile);
   if (catalogRef.current && catalogProfileKeyRef.current === catalogKey) return catalogRef.current;
-  const catalog = await createCatalogClient(profile, signal, retailers);
+  const catalog = await createCatalogClient(profile, signal);
   catalogRef.current = catalog;
   catalogProfileKeyRef.current = catalogKey;
   return catalog;
 }
 
-function profileCatalogKey(profile: UserProfile, retailers?: Retailer[]) {
-  return `${profile.address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ")}:${profile.lentaStoreId || ""}:${retailers?.join(",") ?? ""}`;
+function profileCatalogKey(profile: UserProfile) {
+  return `${profile.address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ")}:${profile.lentaStoreId || ""}`;
 }
 
 function isStaleRetailerResult(state: { catalogMode?: PlannerState["catalogMode"]; variants?: BasketVariant[]; retailerResults?: RetailerResult[] }) {
@@ -452,32 +403,11 @@ function recalculate(variant: BasketVariant): BasketVariant {
   return { ...variant, totalRub, uniqueItemsCount: variant.items.length };
 }
 
-function toAppError(error: unknown, stage: WorkflowStage): AppError {
-  const detail = error instanceof Error ? error.message : "";
-  if (stage === "searching") {
-    const retailerUnavailable = /retailer|магазин/i.test(detail);
-    return {
-      source: "mcp",
-      code: retailerUnavailable ? "retailer_unavailable" : "catalog_unavailable",
-      message: retailerUnavailable ? "Магазин пока недоступен по этому адресу." : "Каталог временно недоступен.",
-      recoverable: true,
-    };
+function toAppError(error: unknown): AppError {
+  if (error instanceof LlmProviderError) {
+    return { source: "llm", code: error.code, message: error.message, recoverable: true };
   }
-  if (stage === "composing") {
-    const insufficient = /достаточно.*товар|товар.*недостаточно|candidate/i.test(detail);
-    return {
-      source: "application",
-      code: insufficient ? "insufficient_products" : "generation",
-      message: insufficient ? "В этом магазине не нашли достаточно подходящих товаров." : "Не получилось собрать подходящую корзину.",
-      recoverable: true,
-    };
-  }
-  return {
-    source: error instanceof LlmProviderError ? "llm" : "application",
-    code: "intent",
-    message: "Не удалось понять запрос. Измените формулировку.",
-    recoverable: true,
-  };
+  return { source: "application", code: "unknown", message: error instanceof Error ? error.message : "Что-то пошло не так.", recoverable: true };
 }
 
 const mockIntent: BasketIntent = {
@@ -486,10 +416,8 @@ const mockIntent: BasketIntent = {
   days: 3,
   meals: ["ужин"],
   budgetRub: 3000,
-  budgetIsHard: true,
   maxCookingMinutes: 35,
   excludedIngredients: ["грибы"],
-  dietaryRestrictions: [],
   preferences: ["простые блюда", "понятный состав"],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -524,11 +452,15 @@ const mockSpeedItems: BasketItem[] = [
   mockItem("debug-304", "Салат овощной с зеленью", 189, 2, "Овощи", "Свежая добавка"),
 ];
 
-const mockVariants: BasketVariant[] = scoreBasketVariants([
-  mockVariant("debug-balanced", "balanced", "Сбалансированная", "баланс цены и готовки", "Цена и готовка в балансе.", mockBalancedItems),
-  mockVariant("debug-economy", "economy", "Экономная", "минимум стоимости", "Дешевле, но готовки может быть больше.", mockBudgetItems),
-  mockVariant("debug-fast", "fast", "Быстрая", "меньше готовки", "Дороже, зато быстрее.", mockSpeedItems),
-], mockIntent);
+const mockVariants: BasketVariant[] = [
+  mockVariant("debug-balanced", "balanced", "Сбалансированная", "Цена и готовка в балансе.", mockBalancedItems, ["Оптимальный баланс бюджета и готовки"]),
+  mockVariant("debug-budget", "budget", "Экономная", "Дешевле, но готовки может быть больше.", mockBudgetItems, ["Минимум стоимости"]),
+  mockVariant("debug-speed", "speed", "Быстрая", "Дороже, зато быстрее.", mockSpeedItems, ["Меньше готовки"]),
+].map((variant, _, variants) => {
+  const balancedTotal = variants.find((item) => item.strategy === "balanced")?.totalRub ?? variant.totalRub;
+  if (variant.strategy !== "budget" || variant.totalRub < balancedTotal) return variant;
+  return { ...variant, title: "Альтернатива", summary: "По цене выше баланса, проверьте состав." };
+});
 
 const mockCandidateProducts: NormalizedProduct[] = [
   ...mockBalancedItems,
@@ -581,23 +513,14 @@ function mockItem(xmlId: string, name: string, priceRub: number, quantity: numbe
   };
 }
 
-function mockVariant(id: string, strategy: BasketVariant["strategy"], title: string, strategyDescription: string, tradeoffSummary: string, items: BasketItem[]): BasketVariant {
+function mockVariant(id: string, strategy: BasketVariant["strategy"], title: string, summary: string, items: BasketItem[], tradeoffs: string[]): BasketVariant {
   const totalRub = Math.round(items.reduce((sum, item) => sum + item.priceRub * item.quantity, 0));
   return {
     id,
-    retailer: "demo",
-    storeId: null,
     strategy,
     title,
-    strategyDescription,
-    coverage: { people: 2, days: 3, meals: [{ type: "ужин", count: 3 }], totalMeals: 3, label: "3 ужина · 2 человека" },
-    constraints: { exclusions: ["грибы"], dietaryRestrictions: [], hardBudgetRub: 3000 },
-    prep: strategy === "fast" ? { minutes: 10, complexity: "low", label: "готовка: меньше" } : strategy === "economy" ? { minutes: 45, complexity: "high", label: "готовка: больше" } : { minutes: 30, complexity: "medium", label: "готовка: средняя" },
-    tradeoffSummary,
-    deltaToBalanced: { priceRub: 0 },
-    score: 0,
-    recommended: false,
-    validation: { status: "not_supported", checkedAt: null },
+    summary,
+    tradeoffs,
     items,
     totalRub,
     uniqueItemsCount: items.length,

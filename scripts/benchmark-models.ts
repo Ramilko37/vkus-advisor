@@ -57,8 +57,8 @@ interface CallMetrics {
   error?: string;
   unknownXmlIdCount?: number;
   hasBalanced?: boolean;
-  hasEconomy?: boolean;
-  hasFast?: boolean;
+  hasBudget?: boolean;
+  hasSpeed?: boolean;
   validVariantsCount?: number;
   searchQueryCount?: number;
   defaultsCorrect?: boolean;
@@ -237,8 +237,8 @@ function inspectBasket(drafts: BasketVariantDraft[], fixture: BasketFixture) {
   return {
     unknownXmlIdCount,
     hasBalanced: strategies.has("balanced"),
-    hasEconomy: strategies.has("economy"),
-    hasFast: strategies.has("fast"),
+    hasBudget: strategies.has("budget"),
+    hasSpeed: strategies.has("speed"),
     validVariantsCount,
   };
 }
@@ -346,7 +346,7 @@ function intentQuality(rows: CallMetrics[]) {
 function basketQuality(rows: CallMetrics[]) {
   if (!rows.length) return 0;
   return rows.reduce((sumValue, row) => {
-    const strategies = [row.hasBalanced, row.hasEconomy, row.hasFast].filter(Boolean).length / 3;
+    const strategies = [row.hasBalanced, row.hasBudget, row.hasSpeed].filter(Boolean).length / 3;
     const variants = (row.validVariantsCount || 0) / 3;
     const unknownPenalty = Math.min(1, (row.unknownXmlIdCount || 0) / 3);
     return sumValue + Math.max(0, strategies * 0.35 + variants * 0.45 + (1 - unknownPenalty) * 0.2);
@@ -397,10 +397,8 @@ function baseIntent(overrides: Partial<BasketIntent> = {}): BasketIntent {
     days: 3,
     meals: ["ужин"],
     budgetRub: null,
-    budgetIsHard: false,
     maxCookingMinutes: 30,
     excludedIngredients: [],
-    dietaryRestrictions: [],
     preferences: [],
     readyFoodAllowed: true,
     priority: "balanced",

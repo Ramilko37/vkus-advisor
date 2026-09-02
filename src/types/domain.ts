@@ -1,6 +1,4 @@
 export type BasketPriority = "balanced" | "budget" | "speed";
-export type BasketStrategy = "balanced" | "economy" | "fast";
-export type Retailer = "vkusvill" | "pyaterochka" | "lenta" | "demo";
 export type BasketItemRole = "breakfast" | "main" | "protein" | "side" | "vegetables" | "snack" | "ready_food" | "drink" | "other";
 export type BasketReasonCode = "good_value" | "versatile" | "high_protein" | "quick" | "ready_to_eat" | "breakfast_fit" | "adds_variety" | "budget_fit" | "family_fit" | "requested_by_user";
 
@@ -12,8 +10,7 @@ export type WorkflowStage =
   | "composing"
   | "ready"
   | "creatingCart"
-  | "error"
-  | "canceled";
+  | "error";
 
 export type ProductSort = "popularity" | "rating" | "price_asc" | "price_desc";
 
@@ -43,8 +40,6 @@ export interface OnboardingState {
   status: OnboardingStatus;
   step: OnboardingStep;
   requestDraft: string;
-  resolvedAddress?: string;
-  resolvedRetailers?: Retailer[];
   completedAt?: string;
   resultsHintDismissed: boolean;
   basketEditHintDismissed: boolean;
@@ -63,10 +58,8 @@ export interface BasketIntent {
   days: number;
   meals: string[];
   budgetRub: number | null;
-  budgetIsHard: boolean;
   maxCookingMinutes: number | null;
   excludedIngredients: string[];
-  dietaryRestrictions: string[];
   preferences: string[];
   readyFoodAllowed: boolean;
   priority: BasketPriority;
@@ -79,7 +72,7 @@ export interface BasketIntent {
 export interface NormalizedProduct {
   id: string;
   xmlId: string;
-  retailer?: Retailer;
+  retailer?: "vkusvill" | "pyaterochka" | "lenta" | "demo";
   name: string;
   priceRub: number;
   oldPriceRub?: number;
@@ -114,9 +107,7 @@ export interface BasketVariantItemDraft {
 
 export interface BasketVariantDraft {
   retailer?: NonNullable<NormalizedProduct["retailer"]>;
-  strategy: BasketStrategy;
-  coverage: BasketCoverage;
-  prepMinutes: number;
+  strategy: BasketPriority;
   items: BasketVariantItemDraft[];
 }
 
@@ -126,46 +117,13 @@ export interface BasketItem extends NormalizedProduct {
   reason: string;
 }
 
-export interface BasketCoverage {
-  people: number;
-  days: number;
-  meals: Array<{ type: string; count: number }>;
-  totalMeals: number;
-  label: string;
-}
-
-export interface BasketConstraints {
-  exclusions: string[];
-  dietaryRestrictions: string[];
-  hardBudgetRub: number | null;
-}
-
-export interface BasketPrep {
-  minutes: number;
-  complexity: "low" | "medium" | "high";
-  label: string;
-}
-
-export interface BasketValidation {
-  status: "not_supported" | "validated" | "partial" | "failed" | "stale";
-  checkedAt: string | null;
-}
-
 export interface BasketVariant {
   id: string;
-  retailer: Retailer;
-  storeId: string | null;
-  strategy: BasketStrategy;
+  retailer?: NormalizedProduct["retailer"];
+  strategy: BasketPriority;
   title: string;
-  strategyDescription: string;
-  coverage: BasketCoverage;
-  constraints: BasketConstraints;
-  prep: BasketPrep;
-  tradeoffSummary: string;
-  deltaToBalanced: { priceRub: number };
-  score: number;
-  recommended: boolean;
-  validation: BasketValidation;
+  summary: string;
+  tradeoffs: string[];
   items: BasketItem[];
   totalRub: number;
   uniqueItemsCount: number;

@@ -9,9 +9,9 @@ import { usePrefersReducedMotion } from "./useLoaderVisualState";
 import "./fullscreen-loader.css";
 
 const steps: Array<{ id: WorkflowStage; title: string; text: string }> = [
-  { id: "analyzing", title: "Поняли задачу", text: "Учитываем дни, бюджет и ограничения" },
-  { id: "searching", title: "Нашли товары", text: "Проверяем подходящие позиции" },
-  { id: "composing", title: "Собираем варианты", text: "Сравниваем три стратегии" },
+  { id: "analyzing", title: "Запрос", text: "Выделяем дни, бюджет и ограничения" },
+  { id: "searching", title: "Каталог", text: "Ищем подходящие товары" },
+  { id: "composing", title: "Варианты", text: "Сравниваем три корзины" },
 ];
 
 export function FullscreenLoader({ stage, intent, onCancel, finishing = false }: { stage: WorkflowStage; intent: BasketIntent | null; onCancel: () => void; finishing?: boolean }) {
@@ -47,7 +47,7 @@ export function FullscreenLoader({ stage, intent, onCancel, finishing = false }:
       {!reducedMotion && <FoodRain stage={stage} finishing={finishing} landedCount={landed.length} basketRef={basketRef} onLand={land} />}
       <PixelBasket items={landed} basketRef={basketRef} bounceKey={bounceKey} finishing={finishing} />
       <section className="liquid-loader-card liquid-glass" aria-label="Прогресс подбора">
-        <h2>{stage === "creatingCart" ? "Готовим ссылку на корзину" : "Подбираем варианты"}</h2>
+        <h2>{stage === "creatingCart" ? "Готовим ссылку на корзину" : "Подбираем корзину"}</h2>
         {intent && (
           <div className="loader-slots" aria-label="Параметры запроса">
             {summarizeIntentSlots(intent).map((slot) => <span key={slot}>{slot}</span>)}

@@ -37,6 +37,10 @@ body {
   font-weight: var(--font-weight-strong);
 }
 
+.hero-offer .vv-copy {
+  color: rgba(255, 255, 255, 0.88);
+}
+
 .vv-copy,
 .variant-difference,
 .basket-row-copy span {

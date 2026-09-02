@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyzeIntent, composeBaskets } from "./basketOrchestrator";
-import type { BasketIntent, BasketVariantDraft, CatalogClient, NormalizedProduct, StructuredGenerationResult } from "../types/domain";
+import type { BasketIntent, CatalogClient, NormalizedProduct, StructuredGenerationResult } from "../types/domain";
 
 const intent: BasketIntent = {
   originalRequest: "ужины",
@@ -8,10 +8,8 @@ const intent: BasketIntent = {
   days: 3,
   meals: ["ужин"],
   budgetRub: 3000,
-  budgetIsHard: true,
   maxCookingMinutes: 20,
   excludedIngredients: [],
-  dietaryRestrictions: [],
   preferences: [],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -37,12 +35,6 @@ const catalog: CatalogClient = {
   async getProductDetails() { return {}; },
   async createCartLink() { return ""; },
 };
-
-const targetCoverage = { people: 2, days: 3, meals: [{ type: "ужин", count: 3 }], totalMeals: 3, label: "3 ужина · 2 человека" };
-
-function modelDraft(strategy: BasketVariantDraft["strategy"], items: BasketVariantDraft["items"], retailer: BasketVariantDraft["retailer"] = "demo"): BasketVariantDraft {
-  return { retailer, strategy, coverage: targetCoverage, prepMinutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30, items };
-}
 
 describe("composeBaskets", () => {
   it("sends persistent profile defaults to the intent prompt separately", async () => {
@@ -79,9 +71,9 @@ describe("composeBaskets", () => {
           model: "test-model",
           data: {
             variants: [
-              modelDraft("balanced", ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" }))),
-              modelDraft("economy", ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "side", reasonCode: "budget_fit" }))),
-              modelDraft("fast", ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "ready_food", reasonCode: "quick" }))),
+              { strategy: "balanced", items: ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })) },
+              { strategy: "budget", items: ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "side", reasonCode: "budget_fit" })) },
+              { strategy: "speed", items: ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "ready_food", reasonCode: "quick" })) },
             ],
           } as T,
         };
@@ -89,86 +81,12 @@ describe("composeBaskets", () => {
     };
 
     const result = await composeBaskets(intent, catalog, model, "session");
-    expect(result.variants.map((variant) => variant.strategy)).toEqual(["balanced", "economy", "fast"]);
+    expect(result.variants.map((variant) => variant.strategy)).toEqual(["balanced", "budget", "speed"]);
     expect(result.variants[0].title).toBe("Сбалансированная");
     expect(result.variants[0].items[0].reason).toBe("Помогает уложиться в бюджет");
     expect(result.retailerResults).toEqual([
       expect.objectContaining({ retailer: "demo", status: "ready", variantCount: 3 }),
     ]);
-  });
-
-  it("repairs only strategies that violate their price or prep tradeoff", async () => {
-    const ids = ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "main" as const, reasonCode: "good_value" as const }));
-    const model = {
-      async generateStructured<T>(): Promise<StructuredGenerationResult<T>> {
-        return {
-          model: "test-model",
-          data: {
-            variants: [
-              modelDraft("balanced", ids.map((item) => ({ ...item, quantity: 2 }))),
-              modelDraft("economy", ids.map((item) => ({ ...item, quantity: 3 }))),
-              { ...modelDraft("fast", ids), prepMinutes: 60 },
-            ],
-          } as T,
-        };
-      },
-    };
-
-    const result = await composeBaskets(intent, catalog, model, "session");
-
-    expect(result.variants.find((variant) => variant.strategy === "balanced")?.items.every((item) => item.quantity === 2)).toBe(true);
-    expect(result.variants.find((variant) => variant.strategy === "economy")?.items.every((item) => item.quantity === 1)).toBe(true);
-    expect(result.variants.find((variant) => variant.strategy === "fast")?.prep.minutes).toBe(10);
-  });
-
-  it("returns a controlled error when fallback cannot restore a strategy tradeoff", async () => {
-    const ids = ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "main" as const, reasonCode: "good_value" as const }));
-    const model = {
-      async generateStructured<T>(): Promise<StructuredGenerationResult<T>> {
-        return {
-          model: "test-model",
-          data: {
-            variants: [
-              { ...modelDraft("balanced", ids), prepMinutes: 5 },
-              modelDraft("economy", ids),
-              { ...modelDraft("fast", ids), prepMinutes: 60 },
-            ],
-          } as T,
-        };
-      },
-    };
-
-    await expect(composeBaskets(intent, catalog, model, "session")).rejects.toThrow("Модель вернула неподходящий формат");
-  });
-
-  it("sends one target coverage to basket generation", async () => {
-    let payload: unknown;
-    const model = {
-      async generateStructured<T>(options: { userPayload: unknown }): Promise<StructuredGenerationResult<T>> {
-        payload = options.userPayload;
-        return {
-          model: "test-model",
-          data: {
-            variants: (["balanced", "economy", "fast"] as const).map((strategy) => modelDraft(
-              strategy,
-              ["1", "2", "3", "4"].map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "good_value" })),
-            )),
-          } as T,
-        };
-      },
-    };
-
-    await composeBaskets(intent, catalog, model, "session");
-
-    expect(payload).toEqual(expect.objectContaining({
-      targetCoverage: {
-        people: 2,
-        days: 3,
-        meals: [{ type: "ужин", count: 3 }],
-        totalMeals: 3,
-        label: "3 ужина · 2 человека",
-      },
-    }));
   });
 
   it("composes every retailer in one model request without mixing candidates", async () => {
@@ -206,11 +124,9 @@ describe("composeBaskets", () => {
               const ids = payload.candidateProducts
                 .filter((product) => product.retailer === retailer)
                 .map((product) => product.xmlId);
-              return ["balanced", "economy", "fast"].map((strategy) => ({
+              return ["balanced", "budget", "speed"].map((strategy) => ({
                 retailer,
                 strategy,
-                coverage: targetCoverage,
-                prepMinutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30,
                 items: ids.map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
               }));
             }),
@@ -224,14 +140,14 @@ describe("composeBaskets", () => {
     expect(result.variants).toHaveLength(9);
     expect(result.variants.map((variant) => variant.id)).toEqual([
       "vkusvill:balanced",
-      "vkusvill:economy",
-      "vkusvill:fast",
+      "vkusvill:budget",
+      "vkusvill:speed",
       "lenta:balanced",
-      "lenta:economy",
-      "lenta:fast",
+      "lenta:budget",
+      "lenta:speed",
       "pyaterochka:balanced",
-      "pyaterochka:economy",
-      "pyaterochka:fast",
+      "pyaterochka:budget",
+      "pyaterochka:speed",
     ]);
     expect(callCount).toBe(1);
     expect(retailersRequested).toEqual(["vkusvill", "lenta", "pyaterochka"]);
@@ -277,11 +193,9 @@ describe("composeBaskets", () => {
           data: {
             variants: payload.retailers.flatMap((retailer) => {
               const ids = payload.candidateProducts.filter((product) => product.retailer === retailer).map((product) => product.xmlId);
-              return ["balanced", "economy", "fast"].map((strategy) => ({
+              return ["balanced", "budget", "speed"].map((strategy) => ({
                 retailer,
                 strategy,
-                coverage: targetCoverage,
-                prepMinutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30,
                 items: ids.map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
               }));
             }),
@@ -321,11 +235,9 @@ describe("composeBaskets", () => {
         return {
           model: "test-model",
           data: {
-            variants: ["balanced", "economy", "fast"].map((strategy) => ({
+            variants: ["balanced", "budget", "speed"].map((strategy) => ({
               retailer: "vkusvill",
               strategy,
-              coverage: targetCoverage,
-              prepMinutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30,
               items: vkusvillProducts.map((product) => ({ xmlId: product.xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
             })),
           } as T,
@@ -338,8 +250,8 @@ describe("composeBaskets", () => {
     expect(modelCallCount).toBe(1);
     expect(result.variants.map((variant) => variant.id)).toEqual([
       "vkusvill:balanced",
-      "vkusvill:economy",
-      "vkusvill:fast",
+      "vkusvill:budget",
+      "vkusvill:speed",
     ]);
     expect(result.retailerResults).toContainEqual(expect.objectContaining({
       retailer: "lenta",
@@ -376,18 +288,14 @@ describe("composeBaskets", () => {
           model: "test-model",
           data: {
             variants: [
-              ...["balanced", "economy", "fast"].map((strategy) => ({
+              ...["balanced", "budget", "speed"].map((strategy) => ({
                 retailer: "vkusvill",
                 strategy,
-                coverage: targetCoverage,
-                prepMinutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30,
                 items: vkusvillIds.map((xmlId) => ({ xmlId, quantity: 2, role: "main", reasonCode: "budget_fit" })),
               })),
-              ...["balanced", "economy", "fast"].map((strategy) => ({
+              ...["balanced", "budget", "speed"].map((strategy) => ({
                 retailer: "lenta",
                 strategy,
-                coverage: targetCoverage,
-                prepMinutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30,
                 items: [1, 2, 3, 4].map((index) => ({ xmlId: `unknown:${index}`, quantity: 2, role: "main", reasonCode: "budget_fit" })),
               })),
             ],
@@ -400,11 +308,11 @@ describe("composeBaskets", () => {
 
     expect(result.variants.map((variant) => variant.id)).toEqual([
       "vkusvill:balanced",
-      "vkusvill:economy",
-      "vkusvill:fast",
+      "vkusvill:budget",
+      "vkusvill:speed",
       "lenta:balanced",
-      "lenta:economy",
-      "lenta:fast",
+      "lenta:budget",
+      "lenta:speed",
     ]);
     expect(callCount).toBe(1);
     expect(result.variants.find((variant) => variant.id === "vkusvill:balanced")?.items[0].quantity).toBe(2);
@@ -454,7 +362,7 @@ describe("composeBaskets", () => {
     expect(callCount).toBe(1);
     expect(result.variants).toHaveLength(6);
     expect(result.variants.map((variant) => variant.id)).toContain("lenta:balanced");
-    expect(result.variants.filter((variant) => variant.retailer === "lenta").map((variant) => variant.totalRub)).toEqual([836, 410, 414]);
+    expect(result.variants.filter((variant) => variant.retailer === "lenta").map((variant) => variant.totalRub)).toEqual([836, 621, 414]);
     expect(result.retailerResults).toContainEqual(expect.objectContaining({ retailer: "lenta", status: "ready", variantCount: 3 }));
   });
 
@@ -483,10 +391,8 @@ describe("composeBaskets", () => {
         return {
           model: "test-model",
           data: {
-            variants: ["balanced", "economy", "fast"].map((strategy) => ({
+            variants: ["balanced", "budget", "speed"].map((strategy) => ({
               strategy,
-              coverage: targetCoverage,
-              prepMinutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30,
               items: lentaProducts.map((product) => ({ xmlId: product.xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
             })),
           } as T,
@@ -496,33 +402,30 @@ describe("composeBaskets", () => {
 
     const result = await composeBaskets(intent, validatingCatalog, model, "session");
 
-    expect(result.variants.map((variant) => variant.id)).toEqual(["lenta:balanced", "lenta:economy", "lenta:fast"]);
+    expect(result.variants.map((variant) => variant.id)).toEqual(["lenta:balanced", "lenta:budget", "lenta:speed"]);
     expect(result.variants[0].items).toHaveLength(4);
-    expect(result.variants[0].validation.status).toBe("partial");
     expect(result.variants[0].warnings).toContain("Не удалось обновить часть товаров Ленты. Проверьте цену перед оформлением.");
   });
 
   it("refreshes Lenta prices and drops unavailable Lenta SKUs before showing baskets", async () => {
     const lentaProducts: NormalizedProduct[] = [
-      { id: "lenta:1", xmlId: "lenta:1", retailer: "lenta", name: "Молоко", priceRub: 90, composition: "молоко", availability: "available", sourceQuery: "молоко", isDemo: false },
-      { id: "lenta:2", xmlId: "lenta:2", retailer: "lenta", name: "Яйца", priceRub: 120, composition: "яйца", availability: "available", sourceQuery: "яйца", isDemo: false },
-      { id: "lenta:3", xmlId: "lenta:3", retailer: "lenta", name: "Овощи", priceRub: 150, composition: "овощи", sourceQuery: "овощи", isDemo: false },
-      { id: "lenta:4", xmlId: "lenta:4", retailer: "lenta", name: "Суп", priceRub: 220, composition: "овощи, вода", sourceQuery: "суп", isDemo: false },
-      { id: "lenta:5", xmlId: "lenta:5", retailer: "lenta", name: "Плов", priceRub: 250, composition: "рис, овощи", sourceQuery: "плов", isDemo: false },
+      { id: "lenta:1", xmlId: "lenta:1", retailer: "lenta", name: "Молоко", priceRub: 90, availability: "available", sourceQuery: "молоко", isDemo: false },
+      { id: "lenta:2", xmlId: "lenta:2", retailer: "lenta", name: "Яйца", priceRub: 120, availability: "available", sourceQuery: "яйца", isDemo: false },
+      { id: "lenta:3", xmlId: "lenta:3", retailer: "lenta", name: "Овощи", priceRub: 150, sourceQuery: "овощи", isDemo: false },
+      { id: "lenta:4", xmlId: "lenta:4", retailer: "lenta", name: "Суп", priceRub: 220, sourceQuery: "суп", isDemo: false },
+      { id: "lenta:5", xmlId: "lenta:5", retailer: "lenta", name: "Плов", priceRub: 250, sourceQuery: "плов", isDemo: false },
     ];
     const validatingCatalog: CatalogClient = {
       mode: "live",
       async connect() {},
-      async searchProducts(query) {
-        return query.query === "готовая еда" ? lentaProducts.slice(3) : lentaProducts.slice(0, 3);
-      },
+      async searchProducts() { return lentaProducts; },
       async getProductDetails() { return {}; },
       async createCartLink() { return ""; },
       async validateBasketItems() {
         return {
           products: [
-            { ...lentaProducts[0], composition: undefined, priceRub: 99, priceObservedAt: "2026-08-29T10:00:00.000Z" },
-            ...lentaProducts.slice(2).map((product) => ({ ...product, composition: undefined })),
+            { ...lentaProducts[0], priceRub: 99, priceObservedAt: "2026-08-29T10:00:00.000Z" },
+            ...lentaProducts.slice(2),
           ],
           unavailableXmlIds: ["lenta:2"],
           changedPrices: [{ xmlId: "lenta:1", oldPriceRub: 90, newPriceRub: 99 }],
@@ -534,10 +437,8 @@ describe("composeBaskets", () => {
         return {
           model: "test-model",
           data: {
-            variants: ["balanced", "economy", "fast"].map((strategy) => ({
+            variants: ["balanced", "budget", "speed"].map((strategy) => ({
               strategy,
-              coverage: targetCoverage,
-              prepMinutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30,
               items: ["lenta:1", "lenta:2", "lenta:3", "lenta:4", "lenta:5"].map((xmlId) => ({ xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
             })),
           } as T,
@@ -545,64 +446,11 @@ describe("composeBaskets", () => {
       },
     };
 
-    const result = await composeBaskets({
-      ...intent,
-      dietaryRestrictions: ["вегетарианство"],
-      searchQueries: [
-        { query: "ужин", purpose: "основа", sort: "popularity" },
-        { query: "готовая еда", purpose: "готовые блюда", sort: "popularity" },
-      ],
-    }, validatingCatalog, model, "session");
+    const result = await composeBaskets(intent, validatingCatalog, model, "session");
 
     expect(result.variants[0].items.map((item) => item.xmlId)).not.toContain("lenta:2");
     expect(result.variants[0].items.find((item) => item.xmlId === "lenta:1")).toMatchObject({ priceRub: 99, priceObservedAt: "2026-08-29T10:00:00.000Z" });
-    expect(result.variants[0].items.find((item) => item.xmlId === "lenta:1")?.composition).toBe("молоко");
-    expect(result.variants[0].totalRub).toBe(719);
-    expect(result.variants[0].validation).toEqual({ status: "validated", checkedAt: "2026-08-29T10:00:00.000Z" });
+    expect(result.variants[0].totalRub).toBe(469);
     expect(result.variants[0].warnings).toContain("Часть товаров Ленты больше недоступна.");
-  });
-
-  it("rejects refreshed variants that no longer fit a hard budget", async () => {
-    const lentaProducts: NormalizedProduct[] = [1, 2, 3, 4].map((index) => ({
-      id: `lenta:${index}`,
-      xmlId: `lenta:${index}`,
-      retailer: "lenta",
-      name: `Лента товар ${index}`,
-      priceRub: 50,
-      sourceQuery: "ужин",
-      isDemo: false,
-    }));
-    const validatingCatalog: CatalogClient = {
-      mode: "live",
-      async connect() {},
-      async searchProducts() { return lentaProducts; },
-      async getProductDetails() { return {}; },
-      async createCartLink() { return ""; },
-      async validateBasketItems() {
-        return {
-          products: lentaProducts.map((product) => ({ ...product, priceRub: 100 })),
-          unavailableXmlIds: [],
-          changedPrices: lentaProducts.map((product) => ({ xmlId: product.xmlId, oldPriceRub: 50, newPriceRub: 100 })),
-        };
-      },
-    };
-    const model = {
-      async generateStructured<T>(): Promise<StructuredGenerationResult<T>> {
-        return {
-          model: "test-model",
-          data: {
-            variants: (["balanced", "economy", "fast"] as const).map((strategy) => ({
-              retailer: "lenta",
-              strategy,
-              coverage: targetCoverage,
-              prepMinutes: strategy === "fast" ? 10 : strategy === "economy" ? 45 : 30,
-              items: lentaProducts.map((product) => ({ xmlId: product.xmlId, quantity: 1, role: "main", reasonCode: "budget_fit" })),
-            })),
-          } as T,
-        };
-      },
-    };
-
-    await expect(composeBaskets({ ...intent, budgetRub: 300 }, validatingCatalog, model, "session")).rejects.toThrow("Модель вернула неподходящий формат");
   });
 });

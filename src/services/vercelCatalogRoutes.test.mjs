@@ -19,18 +19,6 @@ describe("Vercel catalog routes", () => {
       body: { products: [], unavailableXmlIds: [], changedPrices: [] },
     });
   });
-
-  it("does not fall back to an unverified retailer catalog", async () => {
-    const searchRoute = await import("../../api/catalog/search.mjs");
-
-    await expect(post(searchRoute.default, "/api/catalog/search", {
-      query: "молоко",
-      retailers: [],
-    })).resolves.toEqual({
-      status: 200,
-      body: { mode: "live", products: [] },
-    });
-  });
 });
 
 async function post(handler, url, body) {

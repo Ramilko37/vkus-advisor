@@ -6,11 +6,9 @@ export function normalizeBasketIntent(intent: BasketIntent): BasketIntent {
     originalRequest: intent.originalRequest.slice(0, 2000),
     people: clampInteger(intent.people, 1, 20),
     days: clampInteger(intent.days, 1, 31),
-    budgetIsHard: Boolean(intent.budgetRub !== null && intent.budgetIsHard),
     maxCookingMinutes: intent.maxCookingMinutes === null ? null : clampInteger(intent.maxCookingMinutes, 0, 360),
     meals: uniqueNormalizedStrings(intent.meals).slice(0, 6),
     excludedIngredients: uniqueNormalizedStrings(intent.excludedIngredients).slice(0, 20),
-    dietaryRestrictions: uniqueNormalizedStrings(intent.dietaryRestrictions ?? []).slice(0, 20),
     preferences: uniqueNormalizedStrings(intent.preferences).slice(0, 20),
     assumptions: uniqueNormalizedStrings(intent.assumptions).slice(0, 4),
     searchQueries: deduplicateSearchQueries(intent.searchQueries).slice(0, 5),
@@ -20,30 +18,21 @@ export function normalizeBasketIntent(intent: BasketIntent): BasketIntent {
 
 export function applyFastIntentPatch(message: string, intent: BasketIntent): BasketIntent | null {
   const value = message.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ");
-  const resolve = (patch: Partial<BasketIntent>): BasketIntent => ({
-    ...intent,
-    ...patch,
-    needsClarification: false,
-    clarificationQuestion: null,
-  });
 
-  if (/^(сделай )?(дешевле|подешевле|бюджетнее)\.?$/.test(value)) return resolve({ priority: "budget" });
+  if (/^(сделай )?(дешевле|подешевле|бюджетнее)\.?$/.test(value)) return { ...intent, priority: "budget" };
 
   if (/(меньше готовить|почти без готовки|максимально быстро)/.test(value)) {
-    return resolve({ priority: "speed", maxCookingMinutes: Math.min(intent.maxCookingMinutes ?? 15, 15) });
+    return { ...intent, priority: "speed", maxCookingMinutes: Math.min(intent.maxCookingMinutes ?? 15, 15) };
   }
 
   const minutesMatch = value.match(/(?:до|максимум|не больше)\s+(\d+)\s*(?:мин|минут)/);
-  if (minutesMatch) return resolve({ maxCookingMinutes: clampInteger(Number(minutesMatch[1]), 0, 360) });
+  if (minutesMatch) return { ...intent, maxCookingMinutes: clampInteger(Number(minutesMatch[1]), 0, 360) };
 
   const peopleMatch = value.match(/(?:на|для)\s+(\d+)\s+(?:человек|человека|людей)/);
-  if (peopleMatch) return resolve({ people: clampInteger(Number(peopleMatch[1]), 1, 20) });
+  if (peopleMatch) return { ...intent, people: clampInteger(Number(peopleMatch[1]), 1, 20) };
 
   const daysMatch = value.match(/(?:на)\s+(\d+)\s+(?:день|дня|дней)/);
-  if (daysMatch) return resolve({ days: clampInteger(Number(daysMatch[1]), 1, 31) });
-
-  const budgetMatch = value.match(/(?:до|бюджет(?:ом)?)\s+(\d[\d\s]*)\s*(?:₽|руб)/);
-  if (budgetMatch) return resolve({ budgetRub: clampInteger(Number(budgetMatch[1].replace(/\s/g, "")), 1, 1_000_000), budgetIsHard: true });
+  if (daysMatch) return { ...intent, days: clampInteger(Number(daysMatch[1]), 1, 31) };
 
   return null;
 }
@@ -53,7 +42,6 @@ export function buildCatalogFingerprint(intent: BasketIntent, address = ""): str
     address: address.trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " "),
     meals: [...intent.meals].sort(),
     excludedIngredients: [...intent.excludedIngredients].sort(),
-    dietaryRestrictions: [...intent.dietaryRestrictions].sort(),
     preferences: [...intent.preferences].sort(),
     readyFoodAllowed: intent.readyFoodAllowed,
   });

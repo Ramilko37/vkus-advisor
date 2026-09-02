@@ -25,10 +25,8 @@ export const intentPrompt = `Ты — модуль нормализации за
 - days=3;
 - meals=["ужин"];
 - budgetRub=null;
-- budgetIsHard=false;
 - maxCookingMinutes=30;
 - excludedIngredients=profileDefaults.excludedIngredients или [];
-- dietaryRestrictions=[];
 - preferences=profileDefaults.preferences или [];
 - readyFoodAllowed=true;
 - priority="balanced".
@@ -50,8 +48,6 @@ export const intentPrompt = `Ты — модуль нормализации за
 14. Если пользователь явно отменяет ограничение, удали его, а не сохраняй из previousIntent.
 15. Если пользователь меняет количество людей или дней, обнови только соответствующее поле.
 16. Не копируй текст newUserMessage в assumptions.
-17. budgetIsHard=true только для строгого предела («до», «не больше», «максимум»); иначе false.
-18. Явные диеты и режимы питания записывай в dietaryRestrictions, аллергены и исключённые ингредиенты — в excludedIngredients.
 
 Правила searchQueries:
 1. Сформируй от 2 до 5 уникальных запросов.

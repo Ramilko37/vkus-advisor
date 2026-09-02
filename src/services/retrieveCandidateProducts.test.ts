@@ -8,10 +8,8 @@ const baseIntent: BasketIntent = {
   days: 3,
   meals: ["ужин"],
   budgetRub: null,
-  budgetIsHard: false,
   maxCookingMinutes: 30,
-  excludedIngredients: ["грибов"],
-  dietaryRestrictions: [],
+  excludedIngredients: ["грибы"],
   preferences: [],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -88,75 +86,5 @@ describe("retrieveCandidateProducts", () => {
     }, {});
 
     expect(counts.pyaterochka).toBe(4);
-  });
-
-  it("loads composition details for dietary restrictions", async () => {
-    let detailsCalls = 0;
-    const catalog: CatalogClient = {
-      mode: "live",
-      async connect() {},
-      async createCartLink() { return ""; },
-      async getProductDetails() {
-        detailsCalls += 1;
-        return { composition: "овощи" };
-      },
-      async searchProducts(query) {
-        return [{
-          id: "1",
-          xmlId: "1",
-          name: "Готовое блюдо",
-          priceRub: 300,
-          imageUrl: "https://example.com/product.webp",
-          sourceQuery: query.query,
-          isDemo: false,
-        }];
-      },
-    };
-
-    const products = await retrieveCandidateProducts({
-      ...baseIntent,
-      excludedIngredients: [],
-      dietaryRestrictions: ["вегетарианство"],
-    }, catalog);
-
-    expect(detailsCalls).toBe(1);
-    expect(products[0].composition).toBe("овощи");
-  });
-
-  it("loads composition for every capped retailer candidate under hard restrictions", async () => {
-    let detailsCalls = 0;
-    const catalog: CatalogClient = {
-      mode: "live",
-      async connect() {},
-      async createCartLink() { return ""; },
-      async getProductDetails() {
-        detailsCalls += 1;
-        return { composition: "овощи" };
-      },
-      async searchProducts(query) {
-        return (["vkusvill", "lenta", "pyaterochka"] as const).flatMap((retailer) =>
-          [1, 2, 3, 4].map((index): NormalizedProduct => ({
-            id: `${retailer}:${index}`,
-            xmlId: `${retailer}:${index}`,
-            retailer,
-            name: `${retailer} товар ${index}`,
-            priceRub: 100 + index,
-            imageUrl: "https://example.com/product.webp",
-            sourceQuery: query.query,
-            isDemo: false,
-          })),
-        );
-      },
-    };
-
-    const products = await retrieveCandidateProducts({
-      ...baseIntent,
-      excludedIngredients: ["грибов"],
-      searchQueries: [{ query: "ужин", purpose: "ужин", sort: "popularity" }],
-    }, catalog);
-
-    expect(products).toHaveLength(12);
-    expect(detailsCalls).toBe(12);
-    expect(products.every((product) => product.composition === "овощи")).toBe(true);
   });
 });

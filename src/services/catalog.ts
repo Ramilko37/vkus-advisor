@@ -1,11 +1,11 @@
-import type { BasketValidationResult, CatalogClient, LentaStore, NormalizedProduct, Retailer, SearchQuery, UserProfile } from "../types/domain";
+import type { BasketValidationResult, CatalogClient, LentaStore, NormalizedProduct, SearchQuery, UserProfile } from "../types/domain";
 import { logCatalogProductsSummary, recordLentaCatalogProducts } from "./catalogDebug";
 import { DEFAULT_PROFILE } from "./profileRepository";
 
 export class ApiCatalogClient implements CatalogClient {
   mode: "live" | "demo" = "demo";
 
-  constructor(private readonly profile: UserProfile = DEFAULT_PROFILE, private readonly retailers?: Retailer[]) {}
+  constructor(private readonly profile: UserProfile = DEFAULT_PROFILE) {}
 
   async connect(signal?: AbortSignal) {
     const response = await fetchJson<{ mode: "live" | "demo" }>("/api/catalog/status", { method: "GET", signal });
@@ -17,7 +17,7 @@ export class ApiCatalogClient implements CatalogClient {
     const response = await fetchJson<{ mode: "live" | "demo"; products: NormalizedProduct[] }>("/api/catalog/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...query, address: this.profile.address.trim() || undefined, ...lentaStorePayload(this.profile), ...(this.retailers ? { retailers: this.retailers } : {}) }),
+      body: JSON.stringify({ ...query, address: this.profile.address.trim() || undefined, ...lentaStorePayload(this.profile) }),
       signal,
     });
     this.mode = response.mode;
@@ -53,8 +53,8 @@ export class ApiCatalogClient implements CatalogClient {
   }
 }
 
-export async function createCatalogClient(profile: UserProfile = DEFAULT_PROFILE, signal?: AbortSignal, retailers?: Retailer[]): Promise<CatalogClient> {
-  const client = new ApiCatalogClient(profile, retailers);
+export async function createCatalogClient(profile: UserProfile = DEFAULT_PROFILE, signal?: AbortSignal): Promise<CatalogClient> {
+  const client = new ApiCatalogClient(profile);
   await client.connect(signal);
   return client;
 }
@@ -87,44 +87,6 @@ export async function reverseGeocodeAddress(lat: number, lon: number, signal?: A
     signal,
   });
   return response.suggestions;
-}
-
-export type DeliveryContextResult =
-  | { status: "address_not_found" }
-  | { status: "no_retailers"; address: string; retailers: [] }
-  | { status: "ready"; address: string; retailers: Retailer[]; lentaStore?: LentaStore };
-
-export async function resolveDeliveryContext(address: string, signal?: AbortSignal): Promise<DeliveryContextResult> {
-  const [normalizedAddress] = await suggestAddresses(address, signal);
-  if (!normalizedAddress) return { status: "address_not_found" };
-
-  const [storesResult, availabilityResult] = await Promise.allSettled([
-    findLentaStores(normalizedAddress, signal),
-    fetchJson<CatalogAvailability>(`/api/catalog/status?address=${encodeURIComponent(normalizedAddress)}`, { method: "GET", signal }),
-  ]);
-  const stores = storesResult.status === "fulfilled" ? storesResult.value : [];
-  const availability = availabilityResult.status === "fulfilled" ? availabilityResult.value : {};
-  const lentaStore = stores[0];
-  const pyaterochkaAvailable = Boolean(availability.providers?.pyaterochka?.connected && availability.providers.pyaterochka.store === "resolved");
-  const lentaAvailable = Boolean(lentaStore && (availabilityResult.status === "rejected" || availability.providers?.lenta?.enabled));
-  const retailers: Retailer[] = [];
-  // ponytail: add VkusVill here when its provider exposes address coverage instead of global connectivity.
-  if (lentaAvailable) retailers.push("lenta");
-  if (pyaterochkaAvailable) retailers.push("pyaterochka");
-
-  if (!retailers.length) {
-    if (storesResult.status === "rejected" || availabilityResult.status === "rejected") throw new Error("Retailer resolution failed");
-    return { status: "no_retailers", address: normalizedAddress, retailers: [] };
-  }
-  return { status: "ready", address: normalizedAddress, retailers, ...(lentaStore ? { lentaStore } : {}) };
-}
-
-interface CatalogAvailability {
-  providers?: {
-    vkusvill?: { connected?: boolean };
-    lenta?: { enabled?: boolean };
-    pyaterochka?: { connected?: boolean; store?: string };
-  };
 }
 
 function lentaStorePayload(profile: UserProfile) {

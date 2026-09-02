@@ -82,7 +82,7 @@ export async function handleRequest(req, res) {
     if (url.pathname === "/api/openrouter" && req.method === "POST") return await handleOpenRouter(req, res);
     if (url.pathname === "/api/address/suggest" && req.method === "POST") return await handleAddressSuggest(req, res);
     if (url.pathname === "/api/address/geolocate" && req.method === "POST") return await handleAddressGeolocate(req, res);
-    if (url.pathname === "/api/catalog/status") return await handleCatalogStatus(url, res);
+    if (url.pathname === "/api/catalog/status") return await handleCatalogStatus(res);
     if (url.pathname === "/api/catalog/lenta/stores" && req.method === "POST") return await handleLentaStores(req, res);
     if (url.pathname === "/api/catalog/search" && req.method === "POST") return await handleCatalogSearch(req, res);
     if (url.pathname === "/api/catalog/details") return await handleCatalogDetails(url, res);
@@ -544,8 +544,8 @@ function effectiveModel(model) {
   return model === "openrouter/free" ? defaultStructuredModel : model;
 }
 
-async function handleCatalogStatus(url, res) {
-  await ensureMcp(cleanText(stringValue(url.searchParams.get("address"))));
+async function handleCatalogStatus(res) {
+  await ensureMcp();
   send(res, 200, { mode: catalogMode, ...catalogProviderStatus() });
 }
 
@@ -563,13 +563,9 @@ async function handleCatalogSearch(req, res) {
   const query = await readJson(req);
   const address = cleanText(stringValue(query.address));
   const lentaStore = selectedLentaStore(query);
-  const requestedRetailers = Array.isArray(query.retailers)
-    ? new Set(query.retailers.filter((retailer) => ["vkusvill", "pyaterochka", "lenta"].includes(retailer)))
-    : null;
-  const retailerAllowed = (retailer) => !requestedRetailers || requestedRetailers.has(retailer);
-  if (!requestedRetailers || requestedRetailers.has("vkusvill") || requestedRetailers.has("pyaterochka")) await ensureMcp(address);
+  await ensureMcp(address);
   const liveProducts = [];
-  if (retailerAllowed("vkusvill") && catalogMode === "live" && mcpClient) {
+  if (catalogMode === "live" && mcpClient) {
     try {
       const cacheKey = `${normalizeCacheKey(query.query)}:${query.sort || "popularity"}:1`;
       const products = await cached(cacheKey, searchCache, inFlightSearches, searchCacheTtlMs, async () => {
@@ -585,7 +581,7 @@ async function handleCatalogSearch(req, res) {
       catalogMode = pyaterochkaMcpClient ? "live" : "demo";
     }
   }
-  if (retailerAllowed("pyaterochka") && pyaterochkaMcpClient && pyaterochkaStoreId) {
+  if (pyaterochkaMcpClient && pyaterochkaStoreId) {
     try {
       const cacheKey = `pyaterochka:${pyaterochkaStoreId}:${normalizeCacheKey(query.query)}:${query.sort || "popularity"}`;
       const products = await cached(cacheKey, searchCache, inFlightSearches, searchCacheTtlMs, async () => {
@@ -607,7 +603,7 @@ async function handleCatalogSearch(req, res) {
       pyaterochkaUnavailableUntil = Date.now() + 60_000;
     }
   }
-  if (retailerAllowed("lenta") && lentaEnabled && address && lentaStore.id) {
+  if (lentaEnabled && address && lentaStore.id) {
     try {
       const products = await getLentaAdapter(address, lentaStore).searchProducts(query, address);
       liveProducts.push(...products);
@@ -616,7 +612,6 @@ async function handleCatalogSearch(req, res) {
     }
   }
   if (liveProducts.length) return send(res, 200, { mode: "live", products: dedupeByXmlId(liveProducts) });
-  if (requestedRetailers) return send(res, 200, { mode: "live", products: [] });
   send(res, 200, { mode: "demo", products: searchDemo(query).slice(0, 5) });
 }
 
@@ -624,7 +619,6 @@ async function handleLentaStores(req, res) {
   const body = await readJson(req);
   const address = cleanText(stringValue(body.address));
   if (!address) return send(res, 400, { error: "Delivery address is required" });
-  if (!lentaEnabled) return send(res, 200, { stores: [] });
   const adapter = createConfiguredLentaAdapter();
   let stores = await adapter.listStores(address);
   if (!stores.length && process.env.DADATA_API_KEY) {

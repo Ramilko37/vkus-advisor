@@ -8,10 +8,8 @@ const intent: BasketIntent = {
   days: 5,
   meals: ["ужин", "завтрак"],
   budgetRub: 5000,
-  budgetIsHard: true,
   maxCookingMinutes: 30,
   excludedIngredients: [],
-  dietaryRestrictions: [],
   preferences: [],
   readyFoodAllowed: true,
   priority: "balanced",
@@ -37,7 +35,6 @@ describe("intent utils", () => {
   it("keeps fingerprint stable for budget changes and changes for restrictions", () => {
     expect(buildCatalogFingerprint(intent)).toBe(buildCatalogFingerprint({ ...intent, budgetRub: 1000, priority: "budget" }));
     expect(buildCatalogFingerprint(intent)).not.toBe(buildCatalogFingerprint({ ...intent, excludedIngredients: ["молоко"] }));
-    expect(buildCatalogFingerprint(intent)).not.toBe(buildCatalogFingerprint({ ...intent, dietaryRestrictions: ["вегетарианство"] }));
   });
 
   it("changes catalog fingerprint when delivery address changes", () => {
@@ -47,42 +44,6 @@ describe("intent utils", () => {
   it("patches simple cheaper follow-up without resetting intent", () => {
     const patched = applyFastIntentPatch("Сделай дешевле.", intent);
     expect(patched).toMatchObject({ priority: "budget", people: 2, days: 5, meals: ["ужин", "завтрак"] });
-  });
-
-  it("answers a people clarification without losing previous intent", () => {
-    const patched = applyFastIntentPatch("На 4 человека", {
-      ...intent,
-      people: 1,
-      needsClarification: true,
-      clarificationQuestion: "На сколько человек собрать?",
-    });
-
-    expect(patched).toMatchObject({
-      people: 4,
-      days: 5,
-      meals: ["ужин", "завтрак"],
-      needsClarification: false,
-      clarificationQuestion: null,
-    });
-  });
-
-  it("applies a budget quick answer without losing previous intent", () => {
-    const patched = applyFastIntentPatch("До 3000 ₽", {
-      ...intent,
-      budgetRub: null,
-      budgetIsHard: false,
-      needsClarification: true,
-      clarificationQuestion: "Какой бюджет держим?",
-    });
-
-    expect(patched).toMatchObject({
-      budgetRub: 3000,
-      budgetIsHard: true,
-      people: 2,
-      days: 5,
-      needsClarification: false,
-      clarificationQuestion: null,
-    });
   });
 
   it("ignores unknown follow-up text", () => {
