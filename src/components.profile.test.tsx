@@ -304,6 +304,7 @@ describe("ConversationPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Подобрать 3 варианта" }));
 
     expect(submit).toHaveBeenCalledWith("ужины на три дня");
+    expect(screen.getByLabelText("Что собрать?")).toHaveValue("ужины на три дня");
   });
 
   it("fills the request from a task preset without submitting", () => {

@@ -198,6 +198,9 @@ describe("App address-first entry", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/"));
     expect(screen.getByLabelText("Что собрать?")).toBeInTheDocument();
+    expect(screen.getByText("Эта подборка больше недоступна.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Собрать новую корзину" }));
+    expect(screen.queryByText("Эта подборка больше недоступна.")).not.toBeInTheDocument();
     expect(screen.queryByText("Подборка не найдена")).not.toBeInTheDocument();
   });
 });

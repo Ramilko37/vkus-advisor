@@ -65,7 +65,9 @@ function reducer(state: PlannerState, action: Action): PlannerState {
     case "catalog":
       return { ...state, catalogMode: action.mode };
     case "stage":
-      return { ...state, stage: action.stage, error: null };
+      return action.stage === "analyzing"
+        ? { ...state, stage: action.stage, variants: [], retailerResults: [], selectedId: null, error: null }
+        : { ...state, stage: action.stage, error: null };
     case "message":
       return { ...state, messages: [...state.messages, action.message] };
     case "intent":
@@ -376,7 +378,10 @@ function restorePlannerState(catalogContext: string): PlannerState {
 
 function persistPlannerState(state: Pick<PlannerState, "catalogMode" | "intent" | "modelNames" | "retailerResults" | "selectedId" | "variants">, catalogContext: string) {
   try {
-    if (!state.intent || state.variants.length === 0 || isStaleRetailerResult(state)) return;
+    if (!state.intent || state.variants.length === 0 || isStaleRetailerResult(state)) {
+      sessionStorage.removeItem(RESULTS_STORAGE_KEY);
+      return;
+    }
     sessionStorage.setItem(RESULTS_STORAGE_KEY, JSON.stringify({
       schemaVersion: RESULTS_SCHEMA_VERSION,
       catalogContext,
@@ -454,7 +459,7 @@ function toAppError(error: unknown, stage: WorkflowStage): AppError {
     return {
       source: "mcp",
       code: retailerUnavailable ? "retailer_unavailable" : "catalog_unavailable",
-      message: retailerUnavailable ? "Магазин временно недоступен." : "Каталог временно недоступен.",
+      message: retailerUnavailable ? "Магазин пока недоступен по этому адресу." : "Каталог временно недоступен.",
       recoverable: true,
     };
   }
@@ -463,7 +468,7 @@ function toAppError(error: unknown, stage: WorkflowStage): AppError {
     return {
       source: "application",
       code: insufficient ? "insufficient_products" : "generation",
-      message: insufficient ? "Не нашли достаточно товаров." : "Не удалось собрать варианты.",
+      message: insufficient ? "В этом магазине не нашли достаточно подходящих товаров." : "Не получилось собрать подходящую корзину.",
       recoverable: true,
     };
   }

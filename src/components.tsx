@@ -607,7 +607,6 @@ export function ConversationPanel({ planner, hasDeliveryAddress, retailers = [],
   const busy = ["analyzing", "searching", "composing", "creatingCart"].includes(planner.state.stage);
   const submit = (value = text) => {
     void planner.submit(value);
-    setText("");
   };
   const editRequest = () => {
     setText(planner.state.pendingMessage ?? "");

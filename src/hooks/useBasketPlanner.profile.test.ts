@@ -181,6 +181,29 @@ describe("useBasketPlanner profile", () => {
     await waitFor(() => expect(sessionStorage.getItem("vkusvill-advisor:last-results")).toBeNull());
   });
 
+  it("invalidates saved results as soon as a changed request starts", async () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1" };
+    let resolveIntent!: (value: StructuredGenerationResult<BasketIntent>) => void;
+    mocks.generateStructured.mockImplementation(<T,>() => new Promise<StructuredGenerationResult<T>>((resolve) => {
+      resolveIntent = resolve as (value: StructuredGenerationResult<BasketIntent>) => void;
+    }));
+    const { result } = renderHook(() => useBasketPlanner(profile));
+    act(() => result.current.mockResults());
+    await waitFor(() => expect(sessionStorage.getItem("vkusvill-advisor:last-results")).not.toBeNull());
+
+    let workflow!: Promise<void>;
+    act(() => { workflow = result.current.submit("другой набор продуктов на неделю"); });
+
+    expect(result.current.state.stage).toBe("analyzing");
+    expect(result.current.state.variants).toEqual([]);
+    await waitFor(() => expect(sessionStorage.getItem("vkusvill-advisor:last-results")).toBeNull());
+    act(() => result.current.cancel());
+    await act(async () => {
+      resolveIntent({ model: "test-model", data: testIntent() });
+      await workflow;
+    });
+  });
+
   it("requires address before building live retailer baskets", async () => {
     const { result } = renderHook(() => useBasketPlanner(DEFAULT_PROFILE));
 

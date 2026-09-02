@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppShell, BasketResults, BasketResultsSkeleton, ConversationPanel } from "./components";
+import { AppShell, BasketResults, BasketResultsSkeleton, ConversationPanel, ErrorNotice } from "./components";
 import { FullscreenLoader } from "./components/loader/FullscreenLoader";
 import { useLoaderVisualState } from "./components/loader/useLoaderVisualState";
 import { OnboardingFlow } from "./components/onboarding/OnboardingFlow";
@@ -20,6 +20,7 @@ function currentRoute() {
 export function App() {
   const authProfile = useAuthProfile();
   const [route, setRoute] = useState<"home" | "results">(currentRoute);
+  const [routeRecovery, setRouteRecovery] = useState<string | null>(null);
   const onboarding = useOnboarding({ ready: authProfile.authStatus !== "loading" });
   const validAddress = authProfile.profile.address.trim().length >= 8 && /\d/.test(authProfile.profile.address);
   const resolutionMatches = onboarding.state.status === "completed"
@@ -67,9 +68,14 @@ export function App() {
 
   useEffect(() => {
     if (route !== "results" || hasResults || debugResults) return;
+    setRouteRecovery("Эта подборка больше недоступна.");
     window.history.replaceState(null, "", "/");
     setRoute("home");
   }, [debugResults, hasResults, route]);
+
+  useEffect(() => {
+    if (routeRecovery && planner.state.stage !== "idle") setRouteRecovery(null);
+  }, [planner.state.stage, routeRecovery]);
 
   useEffect(() => {
     if (route === "results" && !hasResults && !loading && debugResults) {
@@ -134,17 +140,23 @@ export function App() {
               <BasketResultsSkeleton stage={planner.state.stage} />
             )
           ) : (
-            <ConversationPanel
-              planner={planner}
-              hasDeliveryAddress={Boolean(authProfile.profile.address.trim())}
-              retailers={resolvedRetailers}
-              draft={onboarding.state.requestDraft}
-              onDraftChange={onboarding.setRequestDraft}
-              onNeedsDelivery={(request) => {
-                onboarding.open("delivery", request);
-                setAddressFlowOpen(true);
-              }}
-            />
+            <>
+              {routeRecovery && <ErrorNotice message={routeRecovery} actionLabel="Собрать новую корзину" onAction={() => {
+                setRouteRecovery(null);
+                window.requestAnimationFrame(() => document.getElementById("basket-request")?.focus());
+              }} />}
+              <ConversationPanel
+                planner={planner}
+                hasDeliveryAddress={Boolean(authProfile.profile.address.trim())}
+                retailers={resolvedRetailers}
+                draft={onboarding.state.requestDraft}
+                onDraftChange={onboarding.setRequestDraft}
+                onNeedsDelivery={(request) => {
+                  onboarding.open("delivery", request);
+                  setAddressFlowOpen(true);
+                }}
+              />
+            </>
           )}
         </AppShell>
         {loaderVisual.visible && (
