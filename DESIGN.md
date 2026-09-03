@@ -1,6 +1,6 @@
 ---
-name: "VkusVill Advisor"
-description: "A mobile-first grocery delivery assistant that turns a natural-language request into three practical basket scenarios."
+name: "Умная корзина"
+description: "Focused mobile AI utility that turns a grocery task into comparable real baskets from several retailers."
 colors:
   background: "#eef2ea"
   surface: "#ffffff"
@@ -42,100 +42,112 @@ spacing:
   "5": "20px"
   "6": "24px"
   "8": "32px"
-components:
-  primaryButton:
-    backgroundColor: "{colors.groceryGreen}"
-    color: "{colors.surface}"
-    borderRadius: "{radii.control}"
-    minHeight: "48px"
-  checkoutButton:
-    backgroundColor: "{colors.checkoutBlack}"
-    color: "{colors.surface}"
-    borderRadius: "{radii.pill}"
-    minHeight: "48px"
-  categoryTile:
-    backgroundColor: "{colors.surface}"
-    iconBackground: "{colors.mint}"
-    borderRadius: "{radii.card}"
-  pricePill:
-    backgroundColor: "{colors.groceryGreen}"
-    color: "{colors.surface}"
-    borderRadius: "{radii.pill}"
-  promoCard:
-    background: "linear-gradient(135deg, #09911f, #35b54a 55%, #92da20)"
-    color: "{colors.surface}"
-    borderRadius: "{radii.large}"
 ---
 
-# VkusVill Advisor Design System
+# Дизайн-система «Умной корзины»
 
-## 1. Overview
+## 1. North star
 
-The creative north star is **Grab Food meets Groceria**: a compact grocery delivery app with an AI basket planner inside it. The app should feel like a practical mobile commerce surface, not a chat demo and not a marketing landing page.
+A focused mobile AI utility for turning a grocery task into comparable real baskets.
 
-The product flow stays task-led: delivery context, describe what to buy, quick grocery categories, compare three basket scenarios, open checkout, adjust items, then create or copy the basket.
+Приложение должно ощущаться как самостоятельный помощник для принятия решения, а не как недоделанный маркетплейс, чат-демо или рекламный лендинг.
 
-## 2. Visual Language
+## 2. Основной flow
 
-Use a fresh white shell over a pale green-gray canvas. The top offer area is the strongest brand moment: saturated grocery green, rounded corners, short copy, and a food cue. Ordinary cards stay white and readable. Deep black is reserved for checkout and final action emphasis.
+`задача -> адрес при необходимости -> магазины -> три стратегии -> follow-up -> состав -> покупка или список`
 
-Green means grocery brand, availability, selected state, price, or progress. Lime is only for deals and positive promo badges. Avoid making every surface green.
+Главный экран начинается с task composer. На нём нет фиктивного поиска по каталогу, товарных отделов, промо-hero, избранного, подарков и пяти пунктов нижней навигации.
 
-## 3. Typography
+## 3. Визуальный язык
 
-Use one Russian-friendly sans stack. Product UI uses fixed sizes, not fluid display type:
+- Бледный зелёно-серый canvas и белые content surfaces.
+- Тёмно-зелёный для бренда и главных действий.
+- Лайм только для положительного статуса или рекомендации.
+- Чёрный для финального checkout action.
+- Небольшие тени и ясные borders вместо большого количества парящих карточек.
+- Liquid Glass только для floating controls, dialogs и loader, когда он помогает иерархии.
 
-- Main screen title: `34px`, strong, balanced wrapping.
-- Card title: `22px`, compact line-height.
-- Body: `16px`, medium weight, readable contrast.
-- Labels: `13px`, no uppercase tracking by default.
-- Prices use tabular numbers and compact pill treatment.
+## 4. Pixel-art identity
 
-## 4. Layout
+Pixel art - постоянный брендовый слой:
 
-The app is mobile-first. On phones it fills the viewport; on wider screens the home route may read as a centered mobile app surface.
+- app icon и favicon;
+- первый экран onboarding;
+- animated loader;
+- empty states;
+- success states;
+- OG-image.
 
-Core layout rhythm:
+Lucide остаётся слоем системных иконок. Декоративные emoji не используются как часть идентичности.
 
-- Top utility bar: search, delivery location, profile.
-- Promo card: one strong grocery offer / planner promise.
-- Composer: primary task entry, directly usable.
-- Category shortcuts: four compact tiles.
-- Offer examples: horizontal promo cards.
-- Results: three grocery scenario cards.
-- Selected basket: checkout sheet with solid item rows.
-- Bottom nav: home route only; checkout has its own fixed CTA.
+## 5. Типографика
 
-## 5. Components
+- Screen title: 34 px, strong, balanced wrapping.
+- Card title: 22 px, compact line-height.
+- Body: 16 px, medium weight.
+- Label: 13 px без искусственного uppercase tracking.
+- Цены: tabular numbers и высокий контраст.
 
-### Delivery Topbar
+## 6. Layout
 
-Topbar is utility, not decoration. Location is centered; the profile control stays the real account/address action.
+### Home
 
-### Promo Card
+1. Brand lockup.
+2. Реальный delivery context.
+3. Profile и help controls.
+4. Компактный value statement.
+5. Task composer.
+6. Goal-oriented prompt helpers.
+7. Готовые примеры запросов.
 
-The promo card carries the brand energy. Use saturated green, white text, and one food cue. Keep the copy short and actionable.
+### Results
 
-### Chat Composer
+1. Новый запрос.
+2. Итоговый intent и `Изменить запрос`.
+3. Только доступные ритейлеры с минимальной ценой и checkout capability.
+4. Три стратегии выбранного магазина.
+5. Conversational follow-up.
 
-The composer behaves like a grocery search/request field with prompt chips. It stays white, stable, and keyboard-friendly.
+### Basket
 
-### Category Tiles
+1. Магазин и capability один раз в header.
+2. Состав с полезными catalog attributes.
+3. Quantity, replace и delete.
+4. Freshness disclaimer.
+5. Floating checkout bar.
 
-Tiles are compact rounded buttons with a soft mint icon well. They help the screen feel like grocery delivery even before results exist.
+## 7. Компоненты
 
-### Basket Scenario Card
+### Delivery control
 
-Scenario cards use white surfaces, price pills, metric chips, a short preview list, and a black open action. They should scan like product cards, not reports.
+Показывает сохранённый адрес в компактном виде. При отсутствии адреса показывает `Адрес не указан / Добавить`. Клик сразу открывает delivery setup.
 
-### Basket Item Row
+### Composer
 
-Rows are solid pale surfaces with real product thumbnails when available. Quantity, replace, delete, and price must wrap cleanly on narrow screens.
+Главный control продукта. Prompt helpers описывают пользовательские задачи: `На неделю`, `Экономно`, `Для семьи`, `Без готовки`.
 
-### Checkout Bar
+### Retailer selector
 
-Checkout is a floating pill. Total and item count sit left; final action is black, matching delivery-app checkout conventions.
+Показывает только магазины с готовыми вариантами. Каждый вариант содержит название, минимальную цену и capability `Автокорзина` или `Список`.
 
-## 6. Accessibility
+### Basket strategy card
 
-Maintain 44px minimum touch targets, visible focus rings, readable Russian text, and no horizontal overflow on small screens. Animations must respect reduced motion.
+Три уровня информации:
+
+1. Название и recommendation.
+2. Цена и одна строка сравнения.
+3. До трёх товаров, trade-off и `Посмотреть состав`.
+
+### Checkout
+
+Final action явно различает автоматическую корзину и ручной список. Техническая операция не выдаётся за пользовательский результат.
+
+## 8. Responsive и accessibility
+
+- Mobile-first, 320 px без horizontal overflow.
+- Touch target минимум 44 px.
+- Email auth stack на узком экране.
+- Fixed checkout не перекрывает последний товар.
+- Address autocomplete работает с клавиатуры.
+- Visible focus rings.
+- Reduced-motion сохраняет смысл всех состояний.

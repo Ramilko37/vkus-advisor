@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { getVariantPresentation } from "./variantPresentation";
-import type { BasketItem, BasketVariant } from "../types/domain";
+import { getVariantPresentation, recommendedStrategy } from "./variantPresentation";
+import type { BasketIntent, BasketItem, BasketVariant } from "../types/domain";
 
 const baseItems = [
   item("1", "Куриное филе", 300, "Основное"),
   item("2", "Гречка", 100, "Гарнир"),
   item("3", "Овощи", 150, "Овощи"),
   item("4", "Салат", 120, "Овощи"),
+  item("5", "Кефир", 95, "Напиток"),
+  item("6", "Яйца", 150, "Белок"),
+  item("7", "Яблоки", 140, "Перекус"),
 ];
 
 describe("variant presentation", () => {
@@ -17,19 +20,23 @@ describe("variant presentation", () => {
     const result = getVariantPresentation(budget, [balanced, budget]);
 
     expect(result.title).toBe("Альтернатива");
-    expect(result.priceDeltaLabel).toBe("+200 ₽ к балансу");
+    expect(result.priceDeltaLabel).toBe("На 200 ₽ дороже");
     expect(result.tradeoffText).toBe("По цене выше баланса, проверьте состав.");
+    expect(result.priceDeltaTone).toBe("warning");
   });
 
-  it("shows economical copy only when the budget strategy is cheaper than balanced", () => {
+  it("uses plain language for cheaper, costlier, and equal baskets", () => {
     const balanced = variant("balanced", 1000, baseItems);
-    const budget = variant("budget", 760, baseItems);
+    const cheaper = variant("budget", 869, baseItems);
+    const costlier = variant("speed", 1230, baseItems);
+    const equal = variant("speed", 1000, baseItems);
+    const variants = [balanced, cheaper, costlier, equal];
 
-    const result = getVariantPresentation(budget, [balanced, budget]);
-
-    expect(result.title).toBe("Экономная");
-    expect(result.priceDeltaLabel).toBe("−240 ₽ к балансу");
-    expect(result.tradeoffText).toBe("Дешевле, но готовки может быть больше.");
+    expect(getVariantPresentation(cheaper, variants).priceDeltaLabel).toBe("На 131 ₽ дешевле");
+    expect(getVariantPresentation(costlier, variants).priceDeltaLabel).toBe("На 230 ₽ дороже");
+    expect(getVariantPresentation(equal, variants).priceDeltaLabel).toBe("Цена как у сбалансированной");
+    expect(getVariantPresentation(cheaper, variants).itemCountLabel).toBe("7 товаров");
+    expect(getVariantPresentation(cheaper, variants).priceDeltaTone).toBe("positive");
   });
 
   it("does not call a faster variant more expensive when it is cheaper than balanced", () => {
@@ -38,20 +45,58 @@ describe("variant presentation", () => {
 
     const result = getVariantPresentation(speed, [balanced, speed]);
 
-    expect(result.priceDeltaLabel).toBe("−100 ₽ к балансу");
+    expect(result.priceDeltaLabel).toBe("На 100 ₽ дешевле");
     expect(result.tradeoffText).toBe("Быстрее без переплаты.");
   });
 
-  it("summarizes comparison cards with preview sku, cooking, and meal coverage", () => {
-    const balanced = variant("balanced", 1000, baseItems);
+  it("summarizes comparison cards without draft terminology", () => {
+    const balanced = variant("balanced", 1000, baseItems.slice(0, 4));
 
     const result = getVariantPresentation(balanced, [balanced]);
 
     expect(result.previewItems).toEqual(["Куриное филе", "Гречка", "Овощи"]);
-    expect(result.cookingLabel).toBe("готовка: средняя");
-    expect(result.coverageLabel).toBe("черновик: 4 позиции");
+    expect(result.cookingLabel).toBe("средняя готовка");
+    expect(result.itemCountLabel).toBe("4 товара");
+    expect(JSON.stringify(result)).not.toContain("черновик");
+  });
+
+  it.each([
+    ["budget", "budget"],
+    ["speed", "speed"],
+    ["balanced", "balanced"],
+  ] as const)("recommends %s when that is the resolved priority", (priority, expected) => {
+    const variants = [
+      variant("balanced", 1000, baseItems),
+      variant("budget", 800, baseItems),
+      variant("speed", 1200, baseItems),
+    ];
+
+    expect(recommendedStrategy({ ...intent, priority }, variants)).toBe(expected);
+  });
+
+  it("omits recommendation when the desired budget strategy became an alternative", () => {
+    const variants = [variant("balanced", 1000, baseItems), variant("budget", 1200, baseItems)];
+
+    expect(recommendedStrategy({ ...intent, priority: "budget" }, variants)).toBeNull();
   });
 });
+
+const intent: BasketIntent = {
+  originalRequest: "ужины на 3 дня",
+  people: 2,
+  days: 3,
+  meals: ["ужин"],
+  budgetRub: 3000,
+  maxCookingMinutes: null,
+  excludedIngredients: ["грибов"],
+  preferences: [],
+  readyFoodAllowed: true,
+  priority: "balanced",
+  needsClarification: false,
+  clarificationQuestion: null,
+  assumptions: [],
+  searchQueries: [],
+};
 
 function item(xmlId: string, name: string, priceRub: number, role: string): BasketItem {
   return {

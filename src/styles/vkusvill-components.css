@@ -5,10 +5,6 @@
   --vv-surface-soft: var(--surface-soft);
   --vv-text-primary: var(--text-primary);
   --vv-text-secondary: var(--text-secondary);
-  --vv-text-tertiary: var(--text-muted);
-  --vv-control: var(--border);
-  --vv-control-strong: var(--border-strong);
-  --vv-focus: color-mix(in srgb, var(--accent) 34%, white);
 }
 
 body {
@@ -27,31 +23,16 @@ body {
   min-width: 0;
 }
 
-.vv-preview-header {
-  position: relative;
-}
-
-.vv-title,
 .compact-heading h2,
 .selected-basket h2 {
   font-weight: var(--font-weight-strong);
 }
 
-.hero-offer .vv-copy {
-  color: rgba(255, 255, 255, 0.88);
-}
-
-.vv-copy,
-.variant-difference,
-.basket-row-copy span {
-  color: var(--vv-text-secondary);
-}
-
 .vv-chat-composer,
 .vv-selected-basket,
 .vv-checkout-bar {
-  background: var(--vv-surface);
   border: 0;
+  background: var(--vv-surface);
   box-shadow: var(--shadow-card);
   backdrop-filter: none;
 }
@@ -61,31 +42,9 @@ body {
   box-shadow: var(--shadow-float);
 }
 
-.vv-basket-variant-card,
 .vv-basket-item-row {
   border: 0;
   box-shadow: var(--shadow-card);
-}
-
-.vv-basket-variant-card {
-  background: var(--vv-surface);
-}
-
-.vv-basket-variant-card .variant-card-top {
-  align-items: center;
-}
-
-.vv-basket-variant-card .recommend-badge {
-  background: var(--deal);
-  color: var(--accent-deep);
-}
-
-.vv-basket-variant-card .variant-compare-line span {
-  background: var(--vv-surface-soft);
-}
-
-.vv-basket-variant-card .variant-compare-line span:last-child {
-  color: var(--accent-hover);
 }
 
 .primary-button,
@@ -96,6 +55,7 @@ body {
 .checkout-button {
   background: var(--text-primary);
 }
+
 .onboarding-context-hint {
   display: flex;
   gap: 16px;
@@ -108,10 +68,30 @@ body {
   background: var(--accent-soft);
 }
 
-.onboarding-context-hint p { margin: 0; color: var(--text-secondary); }
-.onboarding-context-hint strong { color: var(--text-primary); }
-.onboarding-context-hint button { flex: 0 0 auto; min-height: 40px; padding: 0 16px; border: 0; border-radius: var(--radius-control); background: var(--accent); color: white; font-weight: 800; cursor: pointer; }
+.onboarding-context-hint p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.onboarding-context-hint strong {
+  color: var(--text-primary);
+}
+
+.onboarding-context-hint button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+}
 
 @media (max-width: 600px) {
-  .onboarding-context-hint { align-items: stretch; flex-direction: column; }
+  .onboarding-context-hint {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }

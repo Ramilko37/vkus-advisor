@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useOnboarding } from "../../hooks/useOnboarding";
+import { createInitialOnboardingState, saveOnboardingState } from "../../services/onboardingRepository";
 import { DEFAULT_PROFILE } from "../../services/profileRepository";
 import type { UserProfile } from "../../types/domain";
 import { OnboardingFlow } from "./OnboardingFlow";
@@ -34,105 +35,65 @@ describe("OnboardingFlow", () => {
     Object.defineProperty(navigator, "geolocation", { configurable: true, value: undefined });
   });
 
-  it("finishes after profile setup and reveals the main screen", async () => {
-    const onProfileChange = vi.fn();
-    mocks.findLentaStores.mockResolvedValue([
-      { id: "525", name: "Лента", address: "Овчинниковская наб., 22/24с1", distanceMeters: 1100 },
-    ]);
-    render(<Harness onProfileChange={onProfileChange} />);
+  it("shows one optional value screen and opens the main product on Try", () => {
+    render(<Harness onDeliveryComplete={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "Соберём покупки вместо вас" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+    expect(screen.queryByLabelText("Адрес")).not.toBeInTheDocument();
+    expect(screen.queryByText("Что учитывать в ваших корзинах?")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Тверская 1" } });
-    expect(await screen.findByText("Лента, Овчинниковская наб., 22/24с1")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Попробовать" }));
 
-    expect(screen.getByRole("heading", { name: "Что учитывать в ваших корзинах?" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Увеличить количество людей" }));
-    fireEvent.change(screen.getByLabelText("Что точно не покупать?"), { target: { value: "грибы" } });
-    fireEvent.keyDown(screen.getByLabelText("Что точно не покупать?"), { key: "Enter" });
-    fireEvent.change(screen.getByLabelText("Что предпочитаете?"), { target: { value: "больше белка" } });
-    fireEvent.keyDown(screen.getByLabelText("Что предпочитаете?"), { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Первоначальная настройка" })).not.toBeInTheDocument();
-      expect(screen.getByText("Главный экран")).toBeInTheDocument();
-      expect(onProfileChange).toHaveBeenCalledWith(expect.objectContaining({
-        address: "Москва, Тверская 1",
-        lentaStoreId: "525",
-        householdSize: 2,
-        excludedIngredients: ["грибы"],
-        preferences: ["больше белка"],
-      }));
-    });
+    expect(screen.queryByRole("dialog", { name: "Первоначальная настройка" })).not.toBeInTheDocument();
+    expect(screen.getByText("Главный экран")).toBeInTheDocument();
   });
 
-  it("automatically selects the nearest Lenta when several stores are found", async () => {
-    const onProfileChange = vi.fn();
+  it("completes deferred delivery and returns the preserved request", async () => {
+    const onDeliveryComplete = vi.fn();
     mocks.findLentaStores.mockResolvedValue([
       { id: "525", name: "ТК1453", address: "Москва, Овчинниковская наб., 22/24с1", distanceMeters: 1127 },
-      { id: "3560", name: "ТК1900", address: "Москва, 3-я Владимирская улица, 23", distanceMeters: 10823 },
     ]);
-    render(<Harness onProfileChange={onProfileChange} />);
+    saveOnboardingState({
+      ...createInitialOnboardingState(),
+      status: "in_progress",
+      step: "delivery",
+      requestDraft: "ужины на три дня",
+    });
+    render(<Harness onDeliveryComplete={onDeliveryComplete} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Вавилова 19" } });
-    expect(await screen.findByRole("radio", { name: /ТК1453/ })).toBeChecked();
-    expect(screen.getByRole("button", { name: "Продолжить" })).toBeEnabled();
+    expect(await screen.findByText("ТК1453, Москва, Овчинниковская наб., 22/24с1")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
 
-    await waitFor(() => expect(onProfileChange).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(onDeliveryComplete).toHaveBeenCalledWith(expect.objectContaining({
       address: "Москва, Вавилова 19",
       lentaStoreId: "525",
-    })));
+    }), "ужины на три дня"));
+    expect(screen.queryByRole("dialog", { name: "Первоначальная настройка" })).not.toBeInTheDocument();
   });
 
-  it("does not continue without a resolved Lenta store", async () => {
+  it("continues with the saved address when Lenta is unavailable", async () => {
+    const onDeliveryComplete = vi.fn();
     mocks.findLentaStores.mockResolvedValue([]);
-    render(<Harness onProfileChange={vi.fn()} />);
+    saveOnboardingState({
+      ...createInitialOnboardingState(),
+      status: "in_progress",
+      step: "delivery",
+      requestDraft: "продукты на неделю для семьи",
+    });
+    render(<Harness onDeliveryComplete={onDeliveryComplete} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
     fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва, Вавилова 19" } });
+    expect(await screen.findByText(/Не нашли ближайшую Ленту/i)).toBeInTheDocument();
 
-    expect(await screen.findByText("Не нашли подходящий магазин для этого адреса")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Продолжить" })).toBeDisabled();
-  });
+    const continueButton = screen.getByRole("button", { name: "Продолжить" });
+    expect(continueButton).toBeEnabled();
+    fireEvent.click(continueButton);
 
-  it("preserves a trailing space while the address is being typed", () => {
-    render(<Harness onProfileChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
-
-    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва " } });
-
-    expect(screen.getByLabelText("Адрес")).toHaveValue("Москва ");
-  });
-
-  it("shows DaData suggestions and selects an address", async () => {
-    mocks.suggestAddresses.mockResolvedValue(["г Москва, ул Тверская, д 1"]);
-    render(<Harness onProfileChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
-
-    fireEvent.change(screen.getByLabelText("Адрес"), { target: { value: "Москва Твер" } });
-    fireEvent.click(await screen.findByRole("option", { name: "г Москва, ул Тверская, д 1" }));
-
-    expect(screen.getByLabelText("Адрес")).toHaveValue("г Москва, ул Тверская, д 1");
-  });
-
-  it("closes address suggestions with Escape without dismissing onboarding", async () => {
-    mocks.suggestAddresses.mockResolvedValue(["г Москва, ул Тверская, д 1"]);
-    render(<Harness onProfileChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
-    const input = screen.getByLabelText("Адрес");
-    fireEvent.change(input, { target: { value: "Москва Твер" } });
-    expect(await screen.findByRole("option")).toBeInTheDocument();
-
-    fireEvent.keyDown(input, { key: "Escape" });
-
-    expect(screen.queryByRole("option")).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Первоначальная настройка" })).toBeInTheDocument();
+    await waitFor(() => expect(onDeliveryComplete).toHaveBeenCalledWith(expect.objectContaining({
+      address: "Москва, Вавилова 19",
+    }), "продукты на неделю для семьи"));
+    expect(onDeliveryComplete.mock.calls[0]?.[0]).not.toHaveProperty("lentaStoreId");
   });
 
   it("fills the address from browser geolocation", async () => {
@@ -143,8 +104,13 @@ describe("OnboardingFlow", () => {
       },
     });
     mocks.reverseGeocodeAddress.mockResolvedValue(["г Москва, ул Петровка, д 17"]);
-    render(<Harness onProfileChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+    saveOnboardingState({
+      ...createInitialOnboardingState(),
+      status: "in_progress",
+      step: "delivery",
+      requestDraft: "ужины",
+    });
+    render(<Harness onDeliveryComplete={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Определить адрес автоматически" }));
 
@@ -152,20 +118,22 @@ describe("OnboardingFlow", () => {
   });
 });
 
-function Harness({ onProfileChange }: { onProfileChange: (profile: UserProfile) => void }) {
+function Harness({ onDeliveryComplete }: { onDeliveryComplete: (profile: UserProfile, request: string) => void }) {
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const onboarding = useOnboarding({ ready: true });
+
+
   return (
     <>
       <div>Главный экран</div>
-      {onboarding.visible && <OnboardingFlow
-        onboarding={onboarding}
-        profile={profile}
-        onProfileChange={(next) => {
-          setProfile(next);
-          onProfileChange(next);
-        }}
-      />}
+      {onboarding.visible && (
+        <OnboardingFlow
+          onboarding={onboarding}
+          profile={profile}
+          onProfileChange={setProfile}
+          onDeliveryComplete={onDeliveryComplete}
+        />
+      )}
     </>
   );
 }
