@@ -92,6 +92,7 @@ export function createYandexEatsRetailAdapter(options = {}) {
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         let status = 0;
         let errorType;
+        let networkCode;
         let resultCount = 0;
         try {
           metrics.requests++;
@@ -113,6 +114,7 @@ export function createYandexEatsRetailAdapter(options = {}) {
           captchaBlocked = false;
           return value;
         } catch (cause) {
+          networkCode = cause?.cause?.message === "unexpected redirect" ? "UNEXPECTED_REDIRECT" : /^[A-Z0-9_]+$/.test(cause?.cause?.code ?? "") ? cause.cause.code : undefined;
           const error = cause instanceof RetailerError ? cause : controller.signal.aborted ? new RetailerTimeoutError() : new RetailerUnavailableError();
           errorType = error.name;
           connected = false;
@@ -135,7 +137,7 @@ export function createYandexEatsRetailAdapter(options = {}) {
             const stats = metrics.retailers[retailer] ??= { requests: 0, errors: 0, results: 0 };
             stats.requests++; stats.errors += Number(Boolean(errorType)); stats.results += resultCount;
           }
-          logger("yandex_eats_request", { operation: path, retailer, status, latency, resultCount, errorType });
+          logger("yandex_eats_request", { operation: path, retailer, status, latency, resultCount, errorType, networkCode });
         }
       }
     });

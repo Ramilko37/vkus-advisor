@@ -122,4 +122,11 @@ describe("Yandex Eats Retail", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(api.metrics.timeouts).toBe(2);
   });
+  it("records safe transport codes without exposing native error messages", async () => {
+    const logger = vi.fn();
+    const api = adapter({ logger, fetchImpl: async () => { throw new TypeError("fetch failed", { cause: { code: "ECONNRESET", message: "sensitive upstream context" } }); } });
+    await expect(api.resolveRetailPlaces(location)).rejects.toMatchObject({ name: "RetailerUnavailableError" });
+    expect(logger).toHaveBeenCalledWith("yandex_eats_request", expect.objectContaining({ networkCode: "ECONNRESET" }));
+    expect(JSON.stringify(logger.mock.calls)).not.toContain("sensitive");
+  });
 });
