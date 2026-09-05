@@ -129,4 +129,20 @@ describe("Yandex Eats Retail", () => {
     expect(logger).toHaveBeenCalledWith("yandex_eats_request", expect.objectContaining({ networkCode: "ECONNRESET" }));
     expect(JSON.stringify(logger.mock.calls)).not.toContain("sensitive");
   });
+  it("follows bounded same-origin retail redirects with the delivery coordinates", async () => {
+    const fetchImpl = vi.fn(async url => {
+      if (url.pathname === "/retail") return new Response(null, { status: 302, headers: { location: "/moscow/retail" } });
+      expect(url.pathname).toBe("/moscow/retail");
+      expect(url.searchParams.get("latitude")).toBe(String(location.lat));
+      expect(url.searchParams.get("longitude")).toBe(String(location.lon));
+      return new Response('<a href="/retail/magnit_test">Магнит</a>');
+    });
+    expect(await adapter({ fetchImpl }).resolveRetailPlaces(location)).toMatchObject([{ retailer: "magnit", placeSlug: "magnit_test" }]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+  it.each([["https://smartcaptcha.yandexcloud.net/check?token=private", "RetailerCaptchaError"], ["/api/v1/cart", "InvalidRetailerResponseError"], ["https://example.com/retail", "InvalidRetailerResponseError"]])("does not follow unsafe or captcha redirect %s", async (url, name) => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 302, headers: { location: url } }));
+    await expect(adapter({ fetchImpl }).resolveRetailPlaces(location)).rejects.toMatchObject({ name });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });

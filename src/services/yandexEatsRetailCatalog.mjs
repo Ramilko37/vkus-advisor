@@ -93,12 +93,27 @@ export function createYandexEatsRetailAdapter(options = {}) {
         let status = 0;
         let errorType;
         let networkCode;
+        let redirectTarget;
         let resultCount = 0;
         try {
-          metrics.requests++;
-          const response = await fetchImpl(url, { method: body ? "POST" : "GET", headers: { Accept: body ? "application/json" : "text/html", "Accept-Language": "ru", ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: controller.signal, redirect: "error", credentials: "omit" });
-          status = response.status;
-          metrics.statuses[status] = (metrics.statuses[status] ?? 0) + 1;
+          let response;
+          let requestUrl = url;
+          for (let redirects = 0; redirects <= 2; redirects++) {
+            metrics.requests++;
+            response = await fetchImpl(requestUrl, { method: body ? "POST" : "GET", headers: { Accept: body ? "application/json" : "text/html", "Accept-Language": "ru", ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: controller.signal, redirect: "manual", credentials: "omit" });
+            status = response.status;
+            metrics.statuses[status] = (metrics.statuses[status] ?? 0) + 1;
+            if (![301, 302, 303, 307, 308].includes(status)) break;
+            const locationHeader = response.headers.get("location");
+            if (!locationHeader) throw new InvalidRetailerResponseError();
+            const next = new URL(locationHeader, requestUrl);
+            redirectTarget = `${next.hostname}${next.pathname}`;
+            if (/captcha/i.test(next.hostname + next.pathname)) throw new RetailerCaptchaError();
+            if (body || redirects === 2 || next.origin !== url.origin || !/^\/(?:[a-z-]+\/)?retail\/?$/i.test(next.pathname) || next.username || next.password) throw new InvalidRetailerResponseError();
+            next.searchParams.set("latitude", String(location.lat));
+            next.searchParams.set("longitude", String(location.lon));
+            requestUrl = next;
+          }
           const text = await response.text();
           if (/smartcaptcha|showcaptcha|captcha-container|подтвердите.{0,30}(не робот|человек)/i.test(text)) throw new RetailerCaptchaError();
           if (status === 429) throw new RetailerRateLimitError(response.headers.get("retry-after"));
@@ -137,7 +152,7 @@ export function createYandexEatsRetailAdapter(options = {}) {
             const stats = metrics.retailers[retailer] ??= { requests: 0, errors: 0, results: 0 };
             stats.requests++; stats.errors += Number(Boolean(errorType)); stats.results += resultCount;
           }
-          logger("yandex_eats_request", { operation: path, retailer, status, latency, resultCount, errorType, networkCode });
+          logger("yandex_eats_request", { operation: path, retailer, status, latency, resultCount, errorType, networkCode, redirectTarget });
         }
       }
     });
