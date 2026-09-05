@@ -1,3 +1,7 @@
+import type retailerDefinitions from "../services/retailerRegistryData.json";
+
+export type RetailerId = keyof typeof retailerDefinitions;
+export type CatalogProviderId = "vkusvill_mcp" | "pyaterochka_mcp" | "lenta_direct" | "lavka_direct" | "yandex_eats" | "demo";
 export type BasketPriority = "balanced" | "budget" | "speed";
 export type BasketItemRole = "breakfast" | "main" | "protein" | "side" | "vegetables" | "snack" | "ready_food" | "drink" | "other";
 export type BasketReasonCode = "good_value" | "versatile" | "high_protein" | "quick" | "ready_to_eat" | "breakfast_fit" | "adds_variety" | "budget_fit" | "family_fit" | "requested_by_user";
@@ -72,7 +76,11 @@ export interface BasketIntent {
 export interface NormalizedProduct {
   id: string;
   xmlId: string;
-  retailer?: "vkusvill" | "pyaterochka" | "lenta" | "demo";
+  retailer?: RetailerId;
+  catalogProvider?: CatalogProviderId;
+  retailerPlaceId?: string;
+  retailerPlaceSlug?: string;
+  retailerPlaceName?: string;
   name: string;
   priceRub: number;
   oldPriceRub?: number;
@@ -96,6 +104,17 @@ export interface NormalizedProduct {
   storeAddress?: string;
   sourceQuery: string;
   isDemo: boolean;
+}
+
+export interface CatalogValidationItem {
+  id?: string;
+  xmlId: string;
+  quantity: number;
+  priceRub?: number;
+  name?: string;
+  retailer?: RetailerId;
+  catalogProvider?: CatalogProviderId;
+  retailerPlaceSlug?: string;
 }
 
 export interface BasketVariantItemDraft {
@@ -207,7 +226,7 @@ export interface CatalogClient {
   connect(signal?: AbortSignal): Promise<void>;
   searchProducts(query: SearchQuery, signal?: AbortSignal): Promise<NormalizedProduct[]>;
   getProductDetails(productId: string, signal?: AbortSignal): Promise<Partial<NormalizedProduct>>;
-  validateBasketItems?(items: Array<{ xmlId: string; quantity: number; priceRub?: number }>, signal?: AbortSignal): Promise<BasketValidationResult>;
+  validateBasketItems?(items: CatalogValidationItem[], signal?: AbortSignal): Promise<BasketValidationResult>;
   createCartLink(items: Array<{ xmlId: string; quantity: number }>, signal?: AbortSignal): Promise<string>;
 }
 

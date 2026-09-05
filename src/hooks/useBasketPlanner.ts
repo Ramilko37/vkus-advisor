@@ -8,6 +8,7 @@ import { measureStage } from "../services/pipelineMetrics";
 import { validateBasketRequest } from "../services/requestCopy";
 import { replaceBasketItem } from "../services/basketEditing";
 import { DEFAULT_PROFILE } from "../services/profileRepository";
+import { catalogValidationItem, DIRECT_RETAILER_IDS, RETAILER_IDS, yandexEatsStoreUrl } from "../services/retailerRegistry";
 
 interface PlannerState {
   stage: WorkflowStage;
@@ -199,7 +200,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       return;
     }
     if (!profile.address.trim()) {
-      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true }, pendingMessage: trimmed });
+      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки: каталог и наличие товаров зависят от местоположения.", recoverable: true }, pendingMessage: trimmed });
       return;
     }
     dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "user", content: trimmed, createdAt: Date.now() } });
@@ -208,7 +209,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
 
   const retry = useCallback(() => {
     if (!profile.address.trim()) {
-      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.", recoverable: true } });
+      dispatch({ type: "error", error: { source: "validation", code: "missing_address", message: "Добавьте адрес доставки: каталог и наличие товаров зависят от местоположения.", recoverable: true } });
       return;
     }
     if (state.pendingMessage) void runWorkflow(state.pendingMessage);
@@ -232,7 +233,12 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
   const createCart = useCallback(async (): Promise<CheckoutResult | null> => {
     const variant = selectedVariant(state);
     if (!variant) return null;
-    const isLenta = variant.retailer === "lenta" || variant.items.every((item) => item.retailer === "lenta");
+    const eatsStoreUrl = yandexEatsStoreUrl(variant.items);
+    if (eatsStoreUrl) return { url: eatsStoreUrl, items: variant.items };
+    const validatedRetailer = variant.retailer === "lenta" || variant.retailer === "lavka"
+      ? variant.retailer
+      : variant.items.every((item) => item.retailer === "lenta") ? "lenta"
+        : variant.items.every((item) => item.retailer === "lavka") ? "lavka" : null;
     try {
       let catalog = catalogRef.current;
       const catalogKey = profileCatalogKey(profile);
@@ -245,10 +251,10 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       }
       if (catalog.mode === "demo") return null;
       dispatch({ type: "stage", stage: "creatingCart" });
-      if (isLenta) {
-        if (!catalog.validateBasketItems) throw new Error("Lenta basket validation is unavailable");
-        const validation = await catalog.validateBasketItems(variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity, priceRub: item.priceRub })));
-        if (validation.unavailableXmlIds.length > 0) throw new Error("Some Lenta basket items are unavailable");
+      if (validatedRetailer) {
+        if (!catalog.validateBasketItems) throw new Error("Basket validation is unavailable");
+        const validation = await catalog.validateBasketItems(variant.items.map(catalogValidationItem));
+        if (validation.unavailableXmlIds.length > 0) throw new Error("Some basket items are unavailable");
         const products = new Map(validation.products.map((product) => [product.xmlId, product]));
         const items = variant.items.map((item) => {
           const product = products.get(item.xmlId);
@@ -256,13 +262,13 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
         });
         dispatch({ type: "items", id: variant.id, items });
         dispatch({ type: "stage", stage: "ready" });
-        return { url: "https://lenta.com/basket/", items };
+        return { url: validatedRetailer === "lavka" ? "https://lavka.yandex.ru/" : "https://lenta.com/basket/", items };
       }
       const url = await catalog.createCartLink(variant.items.map((item) => ({ xmlId: item.xmlId, quantity: item.quantity })));
       dispatch({ type: "stage", stage: "ready" });
       return { url };
     } catch {
-      dispatch({ type: "error", error: { source: "mcp", code: "cart", message: isLenta ? "Не удалось проверить товары Ленты. Обновите корзину или попробуйте позже." : "Не удалось создать ссылку. Список товаров можно скопировать и использовать вручную.", recoverable: true } });
+      dispatch({ type: "error", error: { source: "mcp", code: "cart", message: validatedRetailer ? "Не удалось проверить товары. Обновите корзину или попробуйте позже." : "Не удалось создать ссылку. Список товаров можно скопировать и использовать вручную.", recoverable: true } });
       return null;
     }
   }, [profile, state]);
@@ -379,7 +385,7 @@ function normalizeRetailerResults(value: unknown): RetailerResult[] {
   return value.filter((item): item is RetailerResult => {
     if (!item || typeof item !== "object") return false;
     const result = item as Partial<RetailerResult>;
-    return (result.retailer === "vkusvill" || result.retailer === "lenta" || result.retailer === "pyaterochka" || result.retailer === "demo")
+    return Boolean(result.retailer && RETAILER_IDS.includes(result.retailer))
       && (result.status === "ready" || result.status === "no_candidates" || result.status === "insufficient_candidates" || result.status === "failed")
       && typeof result.candidateCount === "number"
       && typeof result.selectedCandidateCount === "number"
@@ -388,7 +394,7 @@ function normalizeRetailerResults(value: unknown): RetailerResult[] {
 }
 
 function retailerResultsFromVariants(variants: BasketVariant[]): RetailerResult[] {
-  return (["vkusvill", "lenta", "pyaterochka"] as const).map((retailer) => {
+  return [...new Set([...DIRECT_RETAILER_IDS, ...variants.map(variant => variant.retailer || "demo")])].map((retailer) => {
     const count = variants.filter((variant) => variant.retailer === retailer).length;
     return { retailer, status: count > 0 ? "ready" : "no_candidates", candidateCount: count, selectedCandidateCount: count, variantCount: count };
   });

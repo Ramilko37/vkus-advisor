@@ -8,6 +8,8 @@ import { extname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createCatalogProviderStatus, parseEnvBoolean } from "./src/services/catalogProviderStatus.mjs";
 import { createLentaCatalogAdapter } from "./src/services/lentaCatalog.mjs";
+import { createYandexLavkaAdapter } from "./src/services/yandexLavkaCatalog.mjs";
+import { createYandexEatsRetailAdapter } from "./src/services/yandexEatsRetailCatalog.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 loadDotEnv();
@@ -39,6 +41,25 @@ const lentaBaseUrl = process.env.LENTA_API_BASE_URL || "https://integration.api.
 const lentaRetailBrand = process.env.LENTA_RETAIL_BRAND || "lo";
 const lentaChannel = process.env.LENTA_CHANNEL || "lo";
 const lentaApiTimeoutMs = Number(process.env.LENTA_API_TIMEOUT_MS || 5000);
+const lavkaEnabled = parseEnvBoolean(process.env.LAVKA_ENABLED, false);
+const yandexEatsAdapter = createYandexEatsRetailAdapter({
+  enabled: parseEnvBoolean(process.env.YANDEX_EATS_RETAIL_ENABLED),
+  mode: process.env.YANDEX_EATS_RETAIL_MODE || "disabled",
+  baseUrl: process.env.YANDEX_EATS_BASE_URL,
+  timeoutMs: process.env.YANDEX_EATS_TIMEOUT_MS,
+  limit: process.env.YANDEX_EATS_SEARCH_LIMIT,
+  searchCacheTtlMs: process.env.YANDEX_EATS_SEARCH_CACHE_TTL_MS,
+  placeCacheTtlMs: process.env.YANDEX_EATS_PLACE_CACHE_TTL_MS,
+  maxRetailers: process.env.MAX_YANDEX_EATS_RETAILERS_PER_REQUEST,
+  concurrency: process.env.MAX_YANDEX_EATS_CONCURRENCY,
+});
+const lavkaAdapter = createYandexLavkaAdapter({
+  session: process.env.YANDEX_LAVKA_SESSION_JSON,
+  baseUrl: process.env.LAVKA_API_BASE_URL || "https://lavka.yandex.ru",
+  timeoutMs: Number(process.env.LAVKA_API_TIMEOUT_MS || 5000),
+  limit: Number(process.env.LAVKA_SEARCH_LIMIT || 12),
+  cacheTtlMs: Number(process.env.LAVKA_SEARCH_CACHE_TTL_MS || 60000),
+});
 const mcpUrls = [
   process.env.VKUSVILL_MCP_URL || "https://mcp.vkusvill.ru/mcp",
   "https://mcp001.vkusvill.ru/mcp",
@@ -553,6 +574,7 @@ function catalogProviderStatus() {
   return createCatalogProviderStatus({
     env: process.env,
     catalogMode,
+    yandexEatsStatus: yandexEatsAdapter.status(),
     lentaStoreResolved: Boolean(lentaAdapter?.currentStoreId),
     pyaterochkaConnected: Boolean(pyaterochkaMcpClient),
     pyaterochkaStoreState: pyaterochkaStoreId ? "resolved" : pyaterochkaConfiguredStoreId ? "configured" : pyaterochkaStoreAddress || pyaterochkaAddress ? "address" : "missing",
@@ -561,6 +583,7 @@ function catalogProviderStatus() {
 
 async function handleCatalogSearch(req, res) {
   const query = await readJson(req);
+  if (typeof query.query !== "string" || !query.query.trim() || query.query.length > 60) return send(res, 400, { error: "Invalid search query" });
   const address = cleanText(stringValue(query.address));
   const lentaStore = selectedLentaStore(query);
   await ensureMcp(address);
@@ -611,8 +634,25 @@ async function handleCatalogSearch(req, res) {
       logCatalogError("lenta", "search", error);
     }
   }
-  if (liveProducts.length) return send(res, 200, { mode: "live", products: dedupeByXmlId(liveProducts) });
-  send(res, 200, { mode: "demo", products: searchDemo(query).slice(0, 5) });
+  if (lavkaEnabled && address) {
+    try {
+      liveProducts.push(...await lavkaAdapter.searchProducts(query, address));
+    } catch (error) {
+      logCatalogError("lavka", "search", error);
+    }
+  }
+  let candidateProducts = [];
+  if (yandexEatsAdapter.status().enabled && address) {
+    try {
+      const coordinates = await geocodeWithDadata(address);
+      if (coordinates) candidateProducts = await yandexEatsAdapter.searchRetailers(query, { lat: coordinates.latitude, lon: coordinates.longitude }, liveProducts);
+    } catch (error) {
+      logCatalogError("yandex_eats", "search", error);
+    }
+  }
+  const yandexEats = yandexEatsAdapter.status();
+  if (liveProducts.length) return send(res, 200, { mode: "live", products: dedupeByXmlId(liveProducts), candidateProducts, yandexEats });
+  send(res, 200, { mode: "demo", products: searchDemo(query).slice(0, 5), candidateProducts, yandexEats });
 }
 
 async function handleLentaStores(req, res) {
@@ -628,13 +668,14 @@ async function handleLentaStores(req, res) {
   return send(res, 200, { stores });
 }
 
-async function geocodeWithDadata(address) {
+export async function geocodeWithDadata(address) {
   const [suggestion] = await requestDadataSuggestions(
     "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address",
     { query: address, count: 1 },
   );
-  const latitude = Number(suggestion?.data?.geo_lat);
-  const longitude = Number(suggestion?.data?.geo_lon);
+  if (suggestion?.data?.geo_lat == null || suggestion?.data?.geo_lon == null || suggestion.data.geo_lat === "" || suggestion.data.geo_lon === "") return null;
+  const latitude = Number(suggestion.data.geo_lat);
+  const longitude = Number(suggestion.data.geo_lon);
   return Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180
     ? { latitude, longitude }
     : null;
@@ -642,7 +683,17 @@ async function geocodeWithDadata(address) {
 
 async function handleCatalogDetails(url, res) {
   const id = url.searchParams.get("id") || "";
+  if (id.startsWith("yandex_eats:")) return send(res, 409, { error: "ProductRecheckUnsupportedError" });
+  const address = cleanText(url.searchParams.get("address"));
   await ensureMcp();
+  if (id.startsWith("lavka:") && lavkaEnabled) {
+    try {
+      return send(res, 200, await lavkaAdapter.getProductDetails(id, address));
+    } catch (error) {
+      logCatalogError("lavka", "details", error);
+      return send(res, error?.status || 502, { error: error?.name || "Lavka request failed" });
+    }
+  }
   if (id.startsWith("lenta:") && lentaEnabled && lentaAdapter?.hasStore()) {
     try {
       return send(res, 200, await lentaAdapter.getProductDetails(id));
@@ -674,6 +725,8 @@ async function handleCatalogDetails(url, res) {
 
 async function handleCatalogValidate(req, res) {
   const body = await readJson(req);
+  if (!Array.isArray(body.items)) return send(res, 400, { error: "Items must be an array" });
+  if (body.items.some(isYandexEatsItem)) return send(res, 409, { error: "ProductRecheckUnsupportedError", mode: yandexEatsAdapter.status().mode });
   const address = cleanText(stringValue(body.address));
   const lentaStore = selectedLentaStore(body);
   const items = (body.items || []).slice(0, 20);
@@ -698,15 +751,40 @@ async function handleCatalogValidate(req, res) {
       logCatalogError("lenta", "validate", error);
     }
   }
+  const lavkaItems = items.filter((item) => String(item.xmlId || "").startsWith("lavka:"));
+  if (lavkaItems.length && lavkaEnabled && address) {
+    try {
+      const products = await lavkaAdapter.verifyCartItems(lavkaItems, address);
+      const productMap = new Map(products.map((product) => [product.xmlId, product]));
+      result.products.push(...products);
+      for (const item of lavkaItems) {
+        const product = productMap.get(item.xmlId);
+        if (product?.availability === "unavailable") result.unavailableXmlIds.push(item.xmlId);
+      }
+      for (const product of products) {
+        const original = lavkaItems.find((item) => item.xmlId === product.xmlId);
+        if (original && Number(original.priceRub) > 0 && Math.abs(Number(original.priceRub) - product.priceRub) >= 0.01) {
+          result.changedPrices.push({ xmlId: product.xmlId, oldPriceRub: Number(original.priceRub), newPriceRub: product.priceRub });
+        }
+      }
+    } catch (error) {
+      logCatalogError("lavka", "validate", error);
+    }
+  }
   send(res, 200, result);
 }
 
 async function handleCart(req, res) {
   const body = await readJson(req);
+  if (!Array.isArray(body.items)) return send(res, 400, { error: "Items must be an array" });
+  if (body.items.some(isYandexEatsItem)) return send(res, 409, { error: "Yandex Eats supports only opening the store; cart writes are disabled" });
   await ensureMcp();
   const lentaItems = (body.items || []).filter((item) => String(item.xmlId || "").startsWith("lenta:"));
   if (lentaItems.length) {
     return send(res, 409, { error: "Lenta SKU were rechecked through /api/catalog/validate. Public cart links are not available for Lenta yet." });
+  }
+  if ((body.items || []).some((item) => String(item.xmlId || "").startsWith("lavka:"))) {
+    return send(res, 409, { error: "Lavka cart creation is not supported. Products can only be rechecked before opening Lavka." });
   }
   if (catalogMode !== "live" || !mcpClient) return send(res, 409, { error: "Demo mode cannot create cart links" });
   const items = (body.items || []).slice(0, 20);
@@ -812,6 +890,10 @@ function selectedLentaStore(value) {
     name: cleanText(stringValue(value.lentaStoreName)),
     address: cleanText(stringValue(value.lentaStoreAddress)),
   };
+}
+
+function isYandexEatsItem(item) {
+  return item?.catalogProvider === "yandex_eats" || String(item?.xmlId || "").startsWith("yandex_eats:") || String(item?.id || "").startsWith("yandex_eats:");
 }
 
 function logCatalogError(retailer, operation, error) {
@@ -964,6 +1046,7 @@ function normalizeProduct(raw, sourceQuery, isDemo) {
     id: stringValue(raw?.id) || xmlId,
     xmlId,
     retailer: "vkusvill",
+    catalogProvider: isDemo ? "demo" : "vkusvill_mcp",
     name: cleanText(name),
     priceRub,
     oldPriceRub: numberValue(raw?.oldPriceRub ?? raw?.old_price) || numberValue(raw?.price?.old),
@@ -993,6 +1076,7 @@ function normalizePyaterochkaProduct(raw, sourceQuery) {
     id: `pyaterochka:${plu}`,
     xmlId: `pyaterochka:${plu}`,
     retailer: "pyaterochka",
+    catalogProvider: "pyaterochka_mcp",
     name: cleanText(name),
     priceRub,
     oldPriceRub: numberValue(value?.oldPriceRub ?? value?.old_price),
@@ -1110,7 +1194,7 @@ function scoreProduct(product, query) {
   return query.split(/\s+/).reduce((score, token) => score + (text.includes(token) ? 1 : 0), 0);
 }
 
-const demo = (xmlId, name, priceRub, sourceQuery, extra = {}) => ({ id: xmlId, xmlId, name, priceRub, sourceQuery, isDemo: true, ...extra });
+const demo = (xmlId, name, priceRub, sourceQuery, extra = {}) => ({ id: xmlId, xmlId, name, priceRub, sourceQuery, catalogProvider: "demo", isDemo: true, ...extra });
 const demoProducts = [
   demo("demo-101", "Овсяные хлопья 500 г", 89, "завтрак", { rating: 4.8, weightLabel: "500 г", composition: "овсяные хлопья" }),
   demo("demo-102", "Творог 5%", 135, "творог", { rating: 4.7, weightLabel: "200 г", composition: "молоко, закваска" }),

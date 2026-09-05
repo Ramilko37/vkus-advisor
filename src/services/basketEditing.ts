@@ -1,10 +1,12 @@
 import type { BasketItem, NormalizedProduct } from "../types/domain";
+import { catalogProviderFor, isYandexEatsProduct } from "./retailerRegistry";
 
 export function replaceBasketItem(items: BasketItem[], candidates: NormalizedProduct[], xmlId: string): BasketItem[] {
   const current = items.find((item) => item.xmlId === xmlId);
   if (!current) return items;
   const used = new Set(items.map((item) => item.xmlId));
-  const replacement = candidates.find((product) => !used.has(product.xmlId) && sameRetailer(product, current));
+  const replacement = candidates.find((product) => !used.has(product.xmlId) && !isYandexEatsProduct(product) && sameRetailer(product, current)
+    && catalogProviderFor(product) === catalogProviderFor(current) && product.retailerPlaceSlug === current.retailerPlaceSlug);
   if (!replacement) return items;
   return items.map((item) => item.xmlId === xmlId ? {
     ...replacement,

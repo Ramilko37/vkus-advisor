@@ -20,6 +20,12 @@ describe("basket editing", () => {
 
     expect(replaceBasketItem(items, [product("1", "Курица")], "1")).toBe(items);
   });
+  it("cannot replace a direct SKU with a candidate-only SKU of the same retailer", () => {
+    const item = { ...basketItem("lenta:1", "Молоко", 1), retailer: "lenta" as const, catalogProvider: "lenta_direct" as const };
+    const candidate = { ...product("yandex_eats:lenta_test:2", "Молоко"), retailer: "lenta" as const, catalogProvider: "yandex_eats" as const, retailerPlaceSlug: "lenta_test" };
+    const items = [item];
+    expect(replaceBasketItem(items, [candidate], item.xmlId)).toBe(items);
+  });
 });
 
 function basketItem(xmlId: string, name: string, quantity: number): BasketItem {

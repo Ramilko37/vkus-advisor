@@ -319,6 +319,16 @@ describe("ConversationPanel", () => {
 
 describe("BasketResults", () => {
   afterEach(() => cleanup());
+  it("opens an Eats store with honest handoff copy", () => {
+    const variant = makeVariant("lenta", "balanced", "Молоко");
+    variant.items = variant.items.map(item => ({ ...item, catalogProvider: "yandex_eats", retailerPlaceSlug: "lenta_test", xmlId: `yandex_eats:lenta_test:${item.xmlId}` }));
+    render(<BasketResults planner={{
+      state: { stage: "ready", messages: [], intent: null, variants: [variant], retailerResults: [], selectedId: variant.id, error: null, catalogMode: "live", modelNames: [], pendingMessage: null },
+      createCart: vi.fn(), clearVariantSelection: vi.fn(), updateItems: vi.fn(), replaceItem: vi.fn(),
+    } as never} />);
+    expect(screen.getByRole("link", { name: "Открыть магазин в Яндекс Еде" })).toHaveAttribute("href", "https://eda.yandex.ru/retail/lenta_test");
+    expect(screen.queryByText(/Список проверен/)).not.toBeInTheDocument();
+  });
 
   it("provides a header link back to the home screen", () => {
     render(
@@ -557,6 +567,26 @@ describe("SelectedBasketActions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Список проверен и скопирован");
     expect(screen.getByRole("link", { name: "Открыть Ленту" })).toHaveAttribute("href", "https://lenta.com/basket/");
     expect(screen.queryByText("Открыть во ВкусВилл")).not.toBeInTheDocument();
+  });
+
+  it("labels the read-only Lavka handoff without claiming checkout", async () => {
+    const variant = makeVariant("lavka", "balanced", "Молоко Лавка");
+    render(
+      <SelectedBasketActions
+        variant={variant}
+        variants={[variant]}
+        mode="live"
+        creating={false}
+        onItems={vi.fn()}
+        onReplace={vi.fn()}
+        onCreateCart={vi.fn().mockResolvedValue({ url: "https://lavka.yandex.ru/", items: variant.items })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Проверить товары" }));
+
+    expect(await screen.findByRole("link", { name: "Открыть Лавку" })).toHaveAttribute("href", "https://lavka.yandex.ru/");
+    expect(screen.queryByText(/Оформить корзину/)).not.toBeInTheDocument();
   });
 });
 

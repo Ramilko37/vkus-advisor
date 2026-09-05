@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { analyzeIntent, composeBaskets } from "./basketOrchestrator";
 import type { BasketIntent, CatalogClient, NormalizedProduct, StructuredGenerationResult } from "../types/domain";
 
@@ -37,6 +37,15 @@ const catalog: CatalogClient = {
 };
 
 describe("composeBaskets", () => {
+  it("keeps candidate-only Eats products out of final baskets, including reused candidates", async () => {
+    const direct = products.slice(0, 4).map(p => ({ ...p, retailer: "lenta" as const, catalogProvider: "lenta_direct" as const, isDemo: false }));
+    const eats = products.map(p => ({ ...p, id: `yandex_eats:magnit_test:${p.id}`, xmlId: `yandex_eats:magnit_test:${p.id}`, retailer: "magnit" as const, catalogProvider: "yandex_eats" as const, retailerPlaceSlug: "magnit_test", isDemo: false }));
+    const llm = { generateStructured: vi.fn().mockRejectedValue(new Error("fallback")) };
+    const result = await composeBaskets(intent, { ...catalog, mode: "live" }, llm, "test", undefined, [...direct, ...eats]);
+    expect(result.variants).toHaveLength(3);
+    expect(result.variants.every(v => v.retailer === "lenta")).toBe(true);
+    expect(result.candidates.every(p => p.catalogProvider === "lenta_direct")).toBe(true);
+  });
   it("sends persistent profile defaults to the intent prompt separately", async () => {
     let payload: unknown;
     const model = {
@@ -90,7 +99,7 @@ describe("composeBaskets", () => {
   });
 
   it("composes every retailer in one model request without mixing candidates", async () => {
-    const retailerProducts = (["vkusvill", "lenta", "pyaterochka"] as const).flatMap((retailer) =>
+    const retailerProducts = (["vkusvill", "lenta", "pyaterochka", "lavka"] as const).flatMap((retailer) =>
       [1, 2, 3, 4].map((index): NormalizedProduct => ({
         id: `${retailer}:${index}`,
         xmlId: `${retailer}:${index}`,
@@ -137,7 +146,7 @@ describe("composeBaskets", () => {
 
     const result = await composeBaskets(intent, retailerCatalog, model, "session");
 
-    expect(result.variants).toHaveLength(9);
+    expect(result.variants).toHaveLength(12);
     expect(result.variants.map((variant) => variant.id)).toEqual([
       "vkusvill:balanced",
       "vkusvill:budget",
@@ -148,15 +157,19 @@ describe("composeBaskets", () => {
       "pyaterochka:balanced",
       "pyaterochka:budget",
       "pyaterochka:speed",
+      "lavka:balanced",
+      "lavka:budget",
+      "lavka:speed",
     ]);
     expect(callCount).toBe(1);
-    expect(retailersRequested).toEqual(["vkusvill", "lenta", "pyaterochka"]);
-    expect(retailersSeen).toEqual(["vkusvill", "lenta", "pyaterochka"]);
+    expect(retailersRequested).toEqual(["vkusvill", "lenta", "pyaterochka", "lavka"]);
+    expect(retailersSeen).toEqual(["vkusvill", "lenta", "pyaterochka", "lavka"]);
     expect(result.variants.every((variant) => variant.items.every((item) => item.retailer === variant.retailer))).toBe(true);
     expect(result.retailerResults).toEqual([
       expect.objectContaining({ retailer: "vkusvill", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
       expect.objectContaining({ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
       expect.objectContaining({ retailer: "pyaterochka", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
+      expect.objectContaining({ retailer: "lavka", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
     ]);
   });
 
@@ -321,6 +334,7 @@ describe("composeBaskets", () => {
       expect.objectContaining({ retailer: "vkusvill", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
       expect.objectContaining({ retailer: "lenta", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 3 }),
       expect.objectContaining({ retailer: "pyaterochka", status: "no_candidates", candidateCount: 0, selectedCandidateCount: 0, variantCount: 0 }),
+      expect.objectContaining({ retailer: "lavka", status: "no_candidates", candidateCount: 0, selectedCandidateCount: 0, variantCount: 0 }),
     ]);
   });
 
@@ -404,7 +418,7 @@ describe("composeBaskets", () => {
 
     expect(result.variants.map((variant) => variant.id)).toEqual(["lenta:balanced", "lenta:budget", "lenta:speed"]);
     expect(result.variants[0].items).toHaveLength(4);
-    expect(result.variants[0].warnings).toContain("Не удалось обновить часть товаров Ленты. Проверьте цену перед оформлением.");
+    expect(result.variants[0].warnings).toContain("Не удалось обновить часть товаров.");
   });
 
   it("refreshes Lenta prices and drops unavailable Lenta SKUs before showing baskets", async () => {
@@ -451,6 +465,47 @@ describe("composeBaskets", () => {
     expect(result.variants[0].items.map((item) => item.xmlId)).not.toContain("lenta:2");
     expect(result.variants[0].items.find((item) => item.xmlId === "lenta:1")).toMatchObject({ priceRub: 99, priceObservedAt: "2026-08-29T10:00:00.000Z" });
     expect(result.variants[0].totalRub).toBe(469);
-    expect(result.variants[0].warnings).toContain("Часть товаров Ленты больше недоступна.");
+    expect(result.variants[0].warnings).toContain("Часть товаров больше недоступна.");
+  });
+
+  it("validates Lavka items with both identifiers and neutral warnings", async () => {
+    const lavkaProducts: NormalizedProduct[] = [1, 2, 3, 4].map((index) => ({
+      id: `lavka:slug-${index}`,
+      xmlId: `lavka:hash-${index}`,
+      retailer: "lavka",
+      name: `Лавка товар ${index}`,
+      priceRub: 100,
+      sourceQuery: "ужин",
+      isDemo: false,
+    }));
+    const validateBasketItems = vi.fn().mockResolvedValue({
+      products: [{ ...lavkaProducts[0], priceRub: 101 }, ...lavkaProducts.slice(2)],
+      unavailableXmlIds: [lavkaProducts[1].xmlId],
+      changedPrices: [{ xmlId: lavkaProducts[0].xmlId, oldPriceRub: 100, newPriceRub: 101 }],
+    });
+    const catalog: CatalogClient = {
+      mode: "live",
+      async connect() {},
+      async searchProducts() { return lavkaProducts; },
+      async getProductDetails() { return {}; },
+      async createCartLink() { return ""; },
+      validateBasketItems,
+    };
+    const model = {
+      async generateStructured<T>(): Promise<StructuredGenerationResult<T>> {
+        return { model: "test", data: { variants: ["balanced", "budget", "speed"].map((strategy) => ({
+          retailer: "lavka",
+          strategy,
+          items: lavkaProducts.map((item) => ({ xmlId: item.xmlId, quantity: 1, role: "main", reasonCode: "requested_by_user" })),
+        })) } as T };
+      },
+    };
+
+    const result = await composeBaskets(intent, catalog, model, "session");
+
+    expect(validateBasketItems).toHaveBeenCalledWith(lavkaProducts.map((item) => ({ id: item.id, xmlId: item.xmlId, quantity: 1, priceRub: 100, name: item.name, retailer: "lavka", catalogProvider: "lavka_direct", retailerPlaceSlug: undefined })), undefined);
+    expect(result.variants[0].items.map((item) => item.xmlId)).not.toContain("lavka:hash-2");
+    expect(result.variants[0].warnings).toContain("Часть товаров больше недоступна.");
+    expect(result.variants[0].warnings).toContain("Цены обновлены перед показом корзины.");
   });
 });

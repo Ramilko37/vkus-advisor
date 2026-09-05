@@ -74,7 +74,7 @@ describe("useBasketPlanner profile", () => {
     expect(result.current.state.stage).toBe("error");
     expect(result.current.state.error).toEqual(expect.objectContaining({
       code: "missing_address",
-      message: "Добавьте адрес доставки в профиль: без него Лента не выбирает магазин и не возвращает товары.",
+      message: "Добавьте адрес доставки: каталог и наличие товаров зависят от местоположения.",
     }));
     expect(mocks.createCatalogClient).not.toHaveBeenCalled();
   });
@@ -190,13 +190,37 @@ describe("useBasketPlanner profile", () => {
       checkout = await result.current.createCart();
     });
 
-    expect(validateBasketItems).toHaveBeenCalledWith([{ xmlId: "lenta:100", quantity: 2, priceRub: 100 }]);
+    expect(validateBasketItems).toHaveBeenCalledWith([{ id: "lenta:100", xmlId: "lenta:100", quantity: 2, priceRub: 100, name: "Молоко Лента", retailer: "lenta", catalogProvider: "lenta_direct", retailerPlaceSlug: undefined }]);
     expect(createCartLink).not.toHaveBeenCalled();
     expect(checkout!).toEqual({
       url: "https://lenta.com/basket/",
       items: [expect.objectContaining({ xmlId: "lenta:100", quantity: 2, priceRub: 125, role: "breakfast", reason: "Подходит под запрос" })],
     });
     expect(result.current.state.variants[0].totalRub).toBe(250);
+  });
+
+  it("validates a Lavka basket and opens Lavka without creating a cart", async () => {
+    const profile = { ...DEFAULT_PROFILE, address: "Москва, Тверская 1" };
+    const item = {
+      id: "lavka:milk-slug", xmlId: "lavka:milk-hash", retailer: "lavka" as const, name: "Молоко",
+      priceRub: 100, sourceQuery: "молоко", isDemo: false, quantity: 1, role: "breakfast", reason: "Подходит",
+    };
+    sessionStorage.setItem("vkusvill-advisor:last-results", JSON.stringify({
+      schemaVersion: 10, intent: testIntent(), selectedId: "lavka:balanced", catalogMode: "live", modelNames: [],
+      variants: [{ id: "lavka:balanced", retailer: "lavka", strategy: "balanced", title: "Лавка", summary: "", tradeoffs: [], items: [item], totalRub: 100, uniqueItemsCount: 1, warnings: [] }],
+      retailerResults: [{ retailer: "lavka", status: "ready", candidateCount: 4, selectedCandidateCount: 4, variantCount: 1 }],
+    }));
+    const validateBasketItems = vi.fn().mockResolvedValue({ products: [item], unavailableXmlIds: [], changedPrices: [] });
+    const createCartLink = vi.fn();
+    mocks.createCatalogClient.mockResolvedValue({ mode: "live", searchProducts: vi.fn(), getProductDetails: vi.fn(), validateBasketItems, createCartLink });
+
+    const { result } = renderHook(() => useBasketPlanner(profile));
+    let checkout: Awaited<ReturnType<typeof result.current.createCart>>;
+    await act(async () => { checkout = await result.current.createCart(); });
+
+    expect(validateBasketItems).toHaveBeenCalledWith([{ id: item.id, xmlId: item.xmlId, quantity: 1, priceRub: 100, name: item.name, retailer: "lavka", catalogProvider: "lavka_direct", retailerPlaceSlug: undefined }]);
+    expect(createCartLink).not.toHaveBeenCalled();
+    expect(checkout!).toMatchObject({ url: "https://lavka.yandex.ru/" });
   });
 
   it("ignores saved results from stale schemas", () => {

@@ -8,6 +8,7 @@ import { compactPreviousIntent, normalizeBasketIntent } from "./intentUtils";
 import { measureStage } from "./pipelineMetrics";
 import { retrieveCandidateProducts } from "./retrieveCandidateProducts";
 import type { z } from "zod";
+import { catalogValidationItem, DIRECT_RETAILER_IDS, RETAILER_IDS, selectCatalogProviders } from "./retailerRegistry";
 
 interface LlmClientLike {
   generateStructured<T>(options: {
@@ -21,6 +22,8 @@ interface LlmClientLike {
     signal?: AbortSignal;
   }): Promise<StructuredGenerationResult<T>>;
 }
+
+const VALIDATED_RETAILERS = new Set<NormalizedProduct["retailer"]>(["lenta", "lavka"]);
 
 export interface ComposeResult {
   intent: BasketIntent;
@@ -80,12 +83,12 @@ export async function composeBaskets(
   reusedCandidates?: NormalizedProduct[],
 ): Promise<ComposeResult> {
   const catalogReused = Boolean(reusedCandidates && (
-    catalog.mode !== "live" || reusedCandidates.filter((product) => product.retailer === "lenta").length >= 4
+    catalog.mode !== "live" || ["lenta", "lavka"].some((retailer) => reusedCandidates.filter((product) => product.retailer === retailer).length >= 4)
   ));
   const search = catalogReused
     ? { result: reusedCandidates ?? [], durationMs: 0 }
     : await measureStage(() => retrieveCandidateProducts(intent, catalog, signal));
-  let candidates = search.result;
+  let candidates = selectCatalogProviders(search.result, { finalBaskets: true });
   if (!reusedCandidates && catalog.mode === "demo" && candidates.length < 4) {
     candidates = await retrieveCandidateProducts({ ...intent, searchQueries: fallbackQueries(intent) }, catalog, signal);
   }
@@ -148,7 +151,17 @@ async function composeRetailerBaskets(
         retailers: groups.map((group) => group.retailer || "demo"),
         candidateProducts: llmCandidates,
       },
-      jsonSchema: basketDraftJsonSchema,
+      jsonSchema: {
+        ...basketDraftJsonSchema,
+        properties: { variants: { ...basketDraftJsonSchema.properties.variants,
+          minItems: groups.length * 3, maxItems: groups.length * 3,
+          items: { ...basketDraftJsonSchema.properties.variants.items,
+            properties: { ...basketDraftJsonSchema.properties.variants.items.properties,
+              retailer: { type: "string", enum: groups.map(group => group.retailer || "demo") },
+            },
+          },
+        } },
+      },
       validator: basketDraftResponseSchema,
       sessionId,
       stage: "basket",
@@ -218,7 +231,7 @@ function groupCandidatesByRetailer(candidates: NormalizedProduct[]) {
     group.candidates.push(product);
     groups.set(key, group);
   }
-  return ["vkusvill", "lenta", "pyaterochka", "demo"].flatMap((key) => groups.get(key) || []);
+  return RETAILER_IDS.flatMap((key) => groups.get(key) || []);
 }
 
 function countProductsByRetailer(products: NormalizedProduct[]) {
@@ -246,7 +259,7 @@ function buildRetailerResults(
 
   const retailers = rawGroups.some((group) => !group.retailer || group.retailer === "demo")
     ? (["demo"] as const)
-    : (["vkusvill", "lenta", "pyaterochka"] as const);
+    : [...new Set([...DIRECT_RETAILER_IDS, ...rawGroups.map(group => group.retailer || "demo")])];
   return retailers.map((retailer) => {
     const candidateCount = rawCounts.get(retailer) || 0;
     const selectedCandidateCount = selectedCounts.get(retailer) || 0;
@@ -271,9 +284,9 @@ function fallbackQueries(intent: BasketIntent) {
 }
 
 async function refreshValidatedBasketItems(variants: BasketVariant[], catalog: CatalogClient, signal?: AbortSignal): Promise<BasketVariant[]> {
-  const items = variants.flatMap((variant) => variant.items).filter((item) => item.retailer === "lenta");
+  const items = variants.flatMap((variant) => variant.items).filter((item) => VALIDATED_RETAILERS.has(item.retailer));
   if (!items.length || !catalog.validateBasketItems) return variants;
-  const uniqueItems = Array.from(new Map(items.map((item) => [item.xmlId, { xmlId: item.xmlId, quantity: item.quantity, priceRub: item.priceRub }])).values());
+  const uniqueItems = Array.from(new Map(items.map((item) => [item.xmlId, catalogValidationItem(item)])).values());
   try {
     const validation = await catalog.validateBasketItems(uniqueItems, signal);
     const products = new Map(validation.products.map((product) => [product.xmlId, product]));
@@ -285,22 +298,22 @@ async function refreshValidatedBasketItems(variants: BasketVariant[], catalog: C
     return variants.map((variant) => recalculateVariant({
       ...variant,
       items: variant.items.flatMap((item) => {
-        if (item.retailer !== "lenta") return item;
+        if (!VALIDATED_RETAILERS.has(item.retailer)) return item;
         if (unavailable.has(item.xmlId)) return [];
         const product = products.get(item.xmlId);
         return product ? { ...product, quantity: item.quantity, role: item.role, reason: item.reason } : item;
       }),
       warnings: Array.from(new Set([
         ...variant.warnings,
-        ...(variant.items.some((item) => unavailable.has(item.xmlId)) ? ["Часть товаров Ленты больше недоступна."] : []),
-        ...(variant.items.some((item) => changed.has(item.xmlId)) ? ["Цены Ленты обновлены перед показом корзины."] : []),
-        ...(variant.items.some((item) => missingRefresh.has(item.xmlId)) ? ["Не удалось обновить часть товаров Ленты. Проверьте цену перед оформлением."] : []),
+        ...(variant.items.some((item) => unavailable.has(item.xmlId)) ? ["Часть товаров больше недоступна."] : []),
+        ...(variant.items.some((item) => changed.has(item.xmlId)) ? ["Цены обновлены перед показом корзины."] : []),
+        ...(variant.items.some((item) => missingRefresh.has(item.xmlId)) ? ["Не удалось обновить часть товаров."] : []),
       ])),
     }));
   } catch {
     return variants.map((variant) => ({
       ...variant,
-      warnings: Array.from(new Set([...variant.warnings, "Не удалось обновить данные Ленты. Попробуйте ещё раз."])),
+      warnings: Array.from(new Set([...variant.warnings, "Не удалось обновить часть товаров."])),
     }));
   }
 }

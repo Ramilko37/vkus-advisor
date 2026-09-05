@@ -1,4 +1,4 @@
-import type { BasketValidationResult, CatalogClient, LentaStore, NormalizedProduct, SearchQuery, UserProfile } from "../types/domain";
+import type { BasketValidationResult, CatalogClient, CatalogValidationItem, LentaStore, NormalizedProduct, SearchQuery, UserProfile } from "../types/domain";
 import { logCatalogProductsSummary, recordLentaCatalogProducts } from "./catalogDebug";
 import { DEFAULT_PROFILE } from "./profileRepository";
 
@@ -14,7 +14,7 @@ export class ApiCatalogClient implements CatalogClient {
 
   async searchProducts(query: SearchQuery, signal?: AbortSignal) {
     console.info("catalog_search_request", { query: query.query, hasAddress: Boolean(this.profile.address.trim()), lentaStoreId: this.profile.lentaStoreId });
-    const response = await fetchJson<{ mode: "live" | "demo"; products: NormalizedProduct[] }>("/api/catalog/search", {
+    const response = await fetchJson<{ mode: "live" | "demo"; products: NormalizedProduct[]; candidateProducts?: NormalizedProduct[] }>("/api/catalog/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...query, address: this.profile.address.trim() || undefined, ...lentaStorePayload(this.profile) }),
@@ -23,14 +23,15 @@ export class ApiCatalogClient implements CatalogClient {
     this.mode = response.mode;
     logCatalogProductsSummary("search", response.products, query.query);
     recordLentaCatalogProducts("search", response.products, query.query);
-    return response.products;
+    // Candidate-only sources travel through normalization/selection, which excludes them from final baskets.
+    return [...response.products, ...(response.candidateProducts ?? [])];
   }
 
   async getProductDetails(productId: string, signal?: AbortSignal) {
-    return fetchJson<Partial<NormalizedProduct>>(`/api/catalog/details?id=${encodeURIComponent(productId)}`, { method: "GET", signal });
+    return fetchJson<Partial<NormalizedProduct>>(`/api/catalog/details?id=${encodeURIComponent(productId)}&address=${encodeURIComponent(this.profile.address.trim())}`, { method: "GET", signal });
   }
 
-  async validateBasketItems(items: Array<{ xmlId: string; quantity: number; priceRub?: number }>, signal?: AbortSignal) {
+  async validateBasketItems(items: CatalogValidationItem[], signal?: AbortSignal) {
     const response = await fetchJson<BasketValidationResult>("/api/catalog/validate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

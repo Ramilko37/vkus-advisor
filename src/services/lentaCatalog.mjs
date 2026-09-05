@@ -246,6 +246,7 @@ export function normalizeLentaProduct(raw, sourceQuery, priceObservedAt) {
     id: `lenta:${itemId}`,
     xmlId: `lenta:${itemId}`,
     retailer: "lenta",
+    catalogProvider: "lenta_direct",
     name: cleanText(name),
     priceRub,
     oldPriceRub: firstNumber(value?.oldPriceRub, value?.old_price, value?.price?.old, value?.regularPrice, kopecksValue(value?.prices?.priceRegular), kopecksValue(value?.prices?.costRegular)),

@@ -3,6 +3,13 @@ import { ApiCatalogClient } from "./catalog";
 import { DEFAULT_PROFILE } from "./profileRepository";
 
 describe("ApiCatalogClient", () => {
+  it("passes normalized candidate-only products to source selection without changing catalog mode", async () => {
+    const candidate = { id: "yandex_eats:magnit_test:1", xmlId: "yandex_eats:magnit_test:1", name: "Молоко", retailer: "magnit", catalogProvider: "yandex_eats", priceRub: 100, sourceQuery: "молоко", isDemo: false };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ mode: "demo", products: [], candidateProducts: [candidate] }) }));
+    const client = new ApiCatalogClient();
+    expect(await client.searchProducts({ query: "молоко", purpose: "завтрак", sort: "popularity" })).toEqual([candidate]);
+    expect(client.mode).toBe("demo");
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -80,6 +87,19 @@ describe("ApiCatalogClient", () => {
       address: "Москва, улица Вавилова, 19",
       items: [{ xmlId: "lenta:404", quantity: 1 }],
     });
+  });
+
+  it("passes profile address to Lavka product details", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiCatalogClient({ ...DEFAULT_PROFILE, address: "Москва, улица Вавилова, 19" });
+    await client.getProductDetails("lavka:moloko");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/catalog/details?id=lavka%3Amoloko&address=%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0%2C%20%D1%83%D0%BB%D0%B8%D1%86%D0%B0%20%D0%92%D0%B0%D0%B2%D0%B8%D0%BB%D0%BE%D0%B2%D0%B0%2C%2019",
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("logs Lenta products received by search and validation", async () => {

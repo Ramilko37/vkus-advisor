@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RETAILER_IDS } from "./services/retailerRegistry";
 
 export const searchQuerySchema = z.object({
   query: z.string().min(1).max(60),
@@ -27,10 +28,10 @@ export const basketItemRoleSchema = z.enum(["breakfast", "main", "protein", "sid
 export const basketReasonCodeSchema = z.enum(["good_value", "versatile", "high_protein", "quick", "ready_to_eat", "breakfast_fit", "adds_variety", "budget_fit", "family_fit", "requested_by_user"]);
 
 export const basketVariantDraftSchema = z.object({
-  retailer: z.enum(["vkusvill", "lenta", "pyaterochka", "demo"]),
+  retailer: z.enum(RETAILER_IDS),
   strategy: z.enum(["balanced", "budget", "speed"]),
   items: z.array(z.object({
-    xmlId: z.string().min(1).max(64),
+    xmlId: z.string().min(1).max(400),
     quantity: z.number().int().min(1).max(9),
     role: basketItemRoleSchema,
     reasonCode: basketReasonCodeSchema,
@@ -38,7 +39,7 @@ export const basketVariantDraftSchema = z.object({
 }).strict();
 
 export const basketDraftResponseSchema = z.object({
-  variants: z.array(basketVariantDraftSchema).min(3).max(9),
+  variants: z.array(basketVariantDraftSchema).min(3).max(30),
 }).strict();
 
 export const basketIntentJsonSchema = {
@@ -80,13 +81,13 @@ export const basketDraftJsonSchema = {
     variants: {
       type: "array",
       minItems: 3,
-      maxItems: 9,
+      maxItems: 30,
       items: {
         type: "object",
         additionalProperties: false,
         required: ["retailer", "strategy", "items"],
         properties: {
-          retailer: { type: "string", enum: ["vkusvill", "lenta", "pyaterochka", "demo"] },
+          retailer: { type: "string", enum: RETAILER_IDS },
           strategy: { type: "string", enum: ["balanced", "budget", "speed"] },
           items: {
             type: "array",
@@ -97,7 +98,7 @@ export const basketDraftJsonSchema = {
               additionalProperties: false,
               required: ["xmlId", "quantity", "role", "reasonCode"],
               properties: {
-                xmlId: { type: "string", minLength: 1, maxLength: 64 },
+                xmlId: { type: "string", minLength: 1, maxLength: 400 },
                 quantity: { type: "integer", minimum: 1, maximum: 9 },
                 role: { type: "string", enum: ["breakfast", "main", "protein", "side", "vegetables", "snack", "ready_food", "drink", "other"] },
                 reasonCode: { type: "string", enum: ["good_value", "versatile", "high_protein", "quick", "ready_to_eat", "breakfast_fit", "adds_variety", "budget_fit", "family_fit", "requested_by_user"] },

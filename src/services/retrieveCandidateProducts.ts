@@ -1,6 +1,7 @@
 import type { BasketIntent, CatalogClient, NormalizedProduct } from "../types/domain";
 import { MAX_RAW_CANDIDATES, MAX_SEARCH_QUERIES, MAX_SEARCH_RESULTS_PER_QUERY } from "./candidateSelection";
 import { deduplicateSearchQueries } from "./intentUtils";
+import { selectCatalogProviders } from "./retailerRegistry";
 
 export async function retrieveCandidateProducts(
   intent: BasketIntent,
@@ -9,11 +10,13 @@ export async function retrieveCandidateProducts(
 ): Promise<NormalizedProduct[]> {
   const queries = deduplicateSearchQueries(intent.searchQueries).slice(0, MAX_SEARCH_QUERIES);
   const settled = await runLimited(queries, 3, (query) => catalog.searchProducts(query, signal));
-  const products = settled.flatMap((result) => (result.status === "fulfilled" ? capPerRetailer(result.value, MAX_SEARCH_RESULTS_PER_QUERY) : []));
+  const products = settled.flatMap((result) => (result.status === "fulfilled" ? capPerSource(result.value, MAX_SEARCH_RESULTS_PER_QUERY) : []));
   const validProducts = dedupeProducts(products)
     .filter((product) => product.xmlId && product.name && product.priceRub > 0)
     .filter((product) => !matchesExclusions(product, intent.excludedIngredients));
-  const deduped = capRawCandidates(validProducts, MAX_RAW_CANDIDATES, MAX_SEARCH_RESULTS_PER_QUERY);
+  const selectedSources = selectCatalogProviders(validProducts, { finalBaskets: true });
+  const retailerCount = new Set(selectedSources.map(p => p.retailer ?? "demo")).size;
+  const deduped = capRawCandidates(selectedSources, Math.max(MAX_RAW_CANDIDATES, retailerCount * MAX_SEARCH_RESULTS_PER_QUERY), MAX_SEARCH_RESULTS_PER_QUERY);
 
   const needsDetails = deduped.some((product) => !product.imageUrl) || intent.excludedIngredients.length > 0 || intent.preferences.some((item) => /белк|калор/i.test(item));
   if (!needsDetails) return deduped;
@@ -82,17 +85,6 @@ function dedupeProducts(products: NormalizedProduct[]): NormalizedProduct[] {
   return Array.from(map.values());
 }
 
-function capPerRetailer(products: NormalizedProduct[], limit: number): NormalizedProduct[] {
-  const counts = new Map<string, number>();
-  return products.filter((product) => {
-    const key = product.retailer || "demo";
-    const count = counts.get(key) || 0;
-    if (count >= limit) return false;
-    counts.set(key, count + 1);
-    return true;
-  });
-}
-
 function capRawCandidates(products: NormalizedProduct[], limit: number, retailerQuota: number): NormalizedProduct[] {
   const selected: NormalizedProduct[] = [];
   const used = new Set<string>();
@@ -111,6 +103,16 @@ function capRawCandidates(products: NormalizedProduct[], limit: number, retailer
     selected.push(product);
   }
   return selected.slice(0, limit);
+}
+
+function capPerSource(products: NormalizedProduct[], limit: number): NormalizedProduct[] {
+  const counts = new Map<string, number>();
+  return products.filter(product => {
+    const key = `${product.retailer ?? "demo"}:${product.catalogProvider ?? ""}:${product.retailerPlaceSlug ?? product.storeId ?? ""}`;
+    const count = counts.get(key) ?? 0;
+    counts.set(key, count + 1);
+    return count < limit;
+  });
 }
 
 function completeness(product: NormalizedProduct): number {

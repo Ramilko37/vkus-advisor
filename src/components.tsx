@@ -7,6 +7,7 @@ import { normalizeProfile } from "./services/profileRepository";
 import { findLentaStores, suggestAddresses } from "./services/catalog";
 import { getVariantPresentation } from "./services/variantPresentation";
 import { summarizeIntentSlots } from "./services/requestCopy";
+import { DIRECT_RETAILER_IDS, RETAILER_IDS, retailerRegistry, yandexEatsStoreUrl } from "./services/retailerRegistry";
 
 type Planner = ReturnType<typeof useBasketPlanner>;
 type AuthProfile = {
@@ -65,13 +66,8 @@ const roleLabels: Record<string, string> = {
 
 type RetailerKey = NonNullable<BasketVariant["retailer"]>;
 
-const retailerOrder: RetailerKey[] = ["vkusvill", "lenta", "pyaterochka", "demo"];
-const retailerLabels: Record<RetailerKey, string> = {
-  vkusvill: "ВкусВилл",
-  lenta: "Лента",
-  pyaterochka: "Пятёрочка",
-  demo: "Демо",
-};
+const retailerOrder = RETAILER_IDS;
+const retailerLabels = Object.fromEntries(RETAILER_IDS.map(id => [id, retailerRegistry[id].title])) as Record<RetailerKey, string>;
 
 function scrollToTop() {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -931,7 +927,7 @@ function groupBasketVariants(variants: BasketVariant[], retailerResults: Retaile
   return order.flatMap((key) => {
     const group = grouped.get(key);
     const result = resultMap.get(key);
-    return group || result || key !== "demo" ? [{ key, variants: group ?? [], result }] : [];
+    return group || result || (hasRetailers && DIRECT_RETAILER_IDS.includes(key)) ? [{ key, variants: group ?? [], result }] : [];
   });
 }
 
@@ -1017,14 +1013,17 @@ export function SelectedBasketActions({ variant, variants, mode, creating, onIte
   const [removed, setRemoved] = useState<BasketItem | null>(null);
   const presentation = getVariantPresentation(variant, variants);
   const retailer = variant.retailer ?? variant.items[0]?.retailer;
-  const isLenta = retailer === "lenta";
+  const eatsStoreUrl = yandexEatsStoreUrl(variant.items);
+  const isLenta = !eatsStoreUrl && retailer === "lenta";
+  const isLavka = !eatsStoreUrl && retailer === "lavka";
+  const isReadOnlyHandoff = isLenta || isLavka;
   const list = useMemo(() => formatBasketList(variant.items), [variant.items]);
   const copy = () => void navigator.clipboard.writeText(list);
   const checkout = async () => {
     onCheckoutClick?.();
     const result = await onCreateCart();
     if (!result) return;
-    if (isLenta) {
+    if (isReadOnlyHandoff) {
       try {
         await navigator.clipboard.writeText(formatBasketList(result.items ?? variant.items));
         setLentaCopyStatus("copied");
@@ -1073,9 +1072,9 @@ export function SelectedBasketActions({ variant, variants, mode, creating, onIte
             {variant.warnings.map((warning) => <li key={warning}>{warning}</li>)}
           </ul>
         )}
-        {isLenta && lentaCopyStatus !== "idle" && (
+        {isReadOnlyHandoff && lentaCopyStatus !== "idle" && (
           <p className="demo-note" role="status">
-            {lentaCopyStatus === "copied" ? "Список проверен и скопирован. В Ленте добавьте товары вручную." : "Список проверен. Скопируйте его кнопкой выше и добавьте товары в Ленте вручную."}
+            {lentaCopyStatus === "copied" ? "Список проверен и скопирован. Добавьте товары вручную." : "Список проверен. Скопируйте его кнопкой выше и добавьте товары вручную."}
           </p>
         )}
         {mode === "demo" && <p className="demo-note">Это пример корзины: цены и товары нужны для ориентира. Список можно скопировать.</p>}
@@ -1087,6 +1086,7 @@ export function SelectedBasketActions({ variant, variants, mode, creating, onIte
         creating={creating}
         cartUrl={cartUrl}
         retailer={retailer}
+        eatsStoreUrl={eatsStoreUrl}
         onCreateCart={checkout}
       />
     </>
@@ -1119,9 +1119,10 @@ function BottomNav({ route }: { route: "home" | "results" }) {
   );
 }
 
-function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, retailer, onCreateCart }: { totalRub: number; itemCount: number; mode: "live" | "demo" | "connecting"; creating: boolean; cartUrl: string | null; retailer?: BasketVariant["retailer"]; onCreateCart: () => Promise<void> }) {
+function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, retailer, eatsStoreUrl, onCreateCart }: { totalRub: number; itemCount: number; mode: "live" | "demo" | "connecting"; creating: boolean; cartUrl: string | null; retailer?: BasketVariant["retailer"]; eatsStoreUrl?: string | null; onCreateCart: () => Promise<void> }) {
   const label = `${totalRub.toLocaleString("ru-RU")} ₽`;
   const isLenta = retailer === "lenta";
+  const isLavka = retailer === "lavka";
 
   return (
     <div className="checkout-bar vv-checkout-bar liquid-glass">
@@ -1129,13 +1130,15 @@ function CheckoutBar({ totalRub, itemCount, mode, creating, cartUrl, retailer, o
         <strong>{label}</strong>
         <span>{itemCount} позиций</span>
       </div>
-      {mode === "demo" ? (
-        <button className="primary-button checkout-button" type="button" disabled>{isLenta ? "Лента недоступна" : "ВкусВилл недоступен"}</button>
+      {eatsStoreUrl ? (
+        <a className="primary-button checkout-button" href={eatsStoreUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> Открыть магазин в Яндекс Еде</a>
+      ) : mode === "demo" ? (
+        <button className="primary-button checkout-button" type="button" disabled>{isLavka ? "Лавка недоступна" : isLenta ? "Лента недоступна" : "ВкусВилл недоступен"}</button>
       ) : cartUrl ? (
-        <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> {isLenta ? "Открыть Ленту" : "Открыть во ВкусВилл"}</a>
+        <a className="primary-button checkout-button" href={cartUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={18} /> {isLavka ? "Открыть Лавку" : isLenta ? "Открыть Ленту" : "Открыть во ВкусВилл"}</a>
       ) : (
         <button className="primary-button checkout-button" type="button" disabled={creating} onClick={onCreateCart}>
-          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} {isLenta ? "Проверить список Ленты" : "Открыть во ВкусВилл"}
+          {creating ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />} {isLavka ? "Проверить товары" : isLenta ? "Проверить список Ленты" : "Открыть во ВкусВилл"}
         </button>
       )}
     </div>

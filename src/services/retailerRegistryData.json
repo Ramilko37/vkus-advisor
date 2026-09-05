@@ -1,0 +1,16 @@
+{
+  "vkusvill": { "title": "ВкусВилл", "providerPriority": ["vkusvill_mcp", "yandex_eats"], "enabled": true },
+  "lenta": { "title": "Лента", "providerPriority": ["lenta_direct", "yandex_eats"], "enabled": true },
+  "pyaterochka": { "title": "Пятёрочка", "providerPriority": ["pyaterochka_mcp", "yandex_eats"], "enabled": true },
+  "lavka": { "title": "Лавка", "providerPriority": ["lavka_direct"], "enabled": true },
+  "magnit": { "title": "Магнит", "providerPriority": ["yandex_eats"], "enabled": true },
+  "perekrestok": { "title": "Перекрёсток", "providerPriority": ["yandex_eats"], "enabled": true },
+  "metro": { "title": "METRO", "providerPriority": ["yandex_eats"], "enabled": true },
+  "auchan": { "title": "АШАН", "providerPriority": ["yandex_eats"], "enabled": true },
+  "dixy": { "title": "Дикси", "providerPriority": ["yandex_eats"], "enabled": true },
+  "azbuka_vkusa": { "title": "Азбука вкуса", "providerPriority": ["yandex_eats"], "enabled": true },
+  "monetka": { "title": "Монетка", "providerPriority": ["yandex_eats"], "enabled": false },
+  "magnit_semeiny": { "title": "Магнит Семейный", "providerPriority": ["yandex_eats"], "enabled": false },
+  "super_lenta": { "title": "Супер Лента", "providerPriority": ["yandex_eats"], "enabled": false },
+  "demo": { "title": "Демо", "providerPriority": ["demo"], "enabled": true }
+}

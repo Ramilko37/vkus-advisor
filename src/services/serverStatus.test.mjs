@@ -27,8 +27,22 @@ describe("server catalog status", () => {
       providers: {
         vkusvill: { configured: true },
         lenta: { enabled: true },
+        lavka: { enabled: false, configured: false },
         pyaterochka: { configured: false },
       },
     });
+  });
+
+  it("reports Lavka as configured without exposing the session", () => {
+    const status = createCatalogProviderStatus({
+      env: { LAVKA_ENABLED: "true", YANDEX_LAVKA_SESSION_JSON: "top-secret" },
+      catalogMode: "live",
+      lentaStoreResolved: false,
+      pyaterochkaConnected: false,
+      pyaterochkaStoreState: "missing",
+    });
+
+    expect(status.providers.lavka).toEqual({ enabled: true, configured: true });
+    expect(JSON.stringify(status)).not.toContain("top-secret");
   });
 });
