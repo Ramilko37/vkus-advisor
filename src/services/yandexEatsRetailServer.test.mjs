@@ -38,6 +38,7 @@ describe("Eats server integration", () => {
   it("adds distinct retailer identities via existing address geocoder", async () => {
     const result = await request("/api/catalog/search", { query: "молоко", sort: "popularity", address: "Москва, Тверская 1" });
     expect(result.status).toBe(200);
+    expect(result.body.mode).toBe("live");
     expect(result.body.candidateProducts.map(p => p.retailer)).toEqual(["magnit", "metro"]);
     expect(result.body.products.some(p => p.catalogProvider === "yandex_eats")).toBe(false);
     expect(result.body.yandexEats.mode).toBe("candidates_only");

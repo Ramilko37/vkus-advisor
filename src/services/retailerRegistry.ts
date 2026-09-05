@@ -12,6 +12,7 @@ export const RETAILER_IDS = Object.keys(definitions) as [RetailerId, ...Retailer
 export const retailerRegistry = Object.fromEntries(RETAILER_IDS.map(id => [id, { id, ...definitions[id] }])) as Record<RetailerId, RetailerDefinition>;
 export const DIRECT_RETAILER_IDS = RETAILER_IDS.filter(id => id !== "demo" && definitions[id].providerPriority[0] !== "yandex_eats");
 export const MIN_RETAILER_CANDIDATES = 4;
+export const EATS_PREVIEW_WARNING = "Предварительная подборка Яндекс Еды: цены и наличие не перепроверены. Уточните их в магазине.";
 
 export function catalogProviderFor(product: NormalizedProduct): CatalogProviderId {
   return product.catalogProvider ?? (product.isDemo ? "demo" : retailerRegistry[product.retailer ?? "demo"].providerPriority[0]);
@@ -37,7 +38,7 @@ export function selectProviderForRetailer({ retailer, providerCandidates, minCan
 }
 
 export function selectCatalogProviders(products: NormalizedProduct[], { finalBaskets = false } = {}) {
-  // ponytail: no proven exact Eats lookup yet; enable final baskets only with a verified read-only recheck.
+  // Unverified previews opt out explicitly; verified final baskets still exclude Eats.
   const eligible = finalBaskets ? products.filter(p => !isYandexEatsProduct(p)) : products;
   return RETAILER_IDS.flatMap(retailer => selectProviderForRetailer({ retailer, providerCandidates: eligible }));
 }

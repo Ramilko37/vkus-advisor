@@ -223,6 +223,8 @@ export interface PipelineMetrics {
 
 export interface CatalogClient {
   readonly mode: "live" | "demo";
+  readonly allowUnverifiedProducts?: boolean;
+  readonly warnings?: string[];
   connect(signal?: AbortSignal): Promise<void>;
   searchProducts(query: SearchQuery, signal?: AbortSignal): Promise<NormalizedProduct[]>;
   getProductDetails(productId: string, signal?: AbortSignal): Promise<Partial<NormalizedProduct>>;

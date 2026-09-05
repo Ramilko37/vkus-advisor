@@ -7,7 +7,7 @@ import { normalizeProfile } from "./services/profileRepository";
 import { findLentaStores, suggestAddresses } from "./services/catalog";
 import { getVariantPresentation } from "./services/variantPresentation";
 import { summarizeIntentSlots } from "./services/requestCopy";
-import { DIRECT_RETAILER_IDS, RETAILER_IDS, retailerRegistry, yandexEatsStoreUrl } from "./services/retailerRegistry";
+import { DIRECT_RETAILER_IDS, EATS_PREVIEW_WARNING, isYandexEatsProduct, RETAILER_IDS, retailerRegistry, yandexEatsStoreUrl } from "./services/retailerRegistry";
 
 type Planner = ReturnType<typeof useBasketPlanner>;
 type AuthProfile = {
@@ -820,6 +820,7 @@ export function BasketResults({ planner, showResultsHint = false, showBasketEdit
         <strong>Готово. Мы собрали несколько способов решить вашу задачу.</strong> У вариантов разные приоритеты: цена, баланс состава и минимум готовки. Откройте любую корзину, чтобы посмотреть товары и изменить состав.
       </ContextHint>}
       {planner.state.catalogMode === "demo" && <DemoModeBanner onReconnect={planner.reconnectCatalog} />}
+      {planner.state.catalogWarnings?.map(warning => <p className="demo-note" role="status" key={warning}>{warning}</p>)}
       {retailerGroups.length > 1 && (
         <div className="retailer-tabs" role="tablist" aria-label="Магазин">
           {retailerGroups.map((group) => (
@@ -949,6 +950,7 @@ export function BasketVariantCard({ variant, recommended, variants, onSelect }: 
           {recommended && presentation.recommendationLabel && <strong className="recommend-badge">{presentation.recommendationLabel}</strong>}
         </div>
         <strong className="price">{variant.totalRub.toLocaleString("ru-RU")} ₽</strong>
+        {variant.items.some(isYandexEatsProduct) && <p className="demo-note">{EATS_PREVIEW_WARNING}</p>}
         <div className="variant-compare-line">
           <span>{presentation.coverageLabel}</span>
           <span>{presentation.cookingLabel}</span>
@@ -972,7 +974,7 @@ export function BasketItemRow({ item, onQuantity, onDelete, onReplace }: { item:
         <strong>{item.name}</strong>
         {item.retailer === "lenta" && item.storeName && <span>Лента · {item.storeName}{item.storeAddress ? `, ${item.storeAddress}` : ""}</span>}
         <span>{item.weightLabel ?? roleLabels[item.role] ?? "Продукт"}</span>
-        {item.priceObservedAt && <span>Цена проверена: {formatObservedAt(item.priceObservedAt)}</span>}
+        {item.priceObservedAt && <span>{isYandexEatsProduct(item) ? "Цена в выдаче" : "Цена проверена"}: {formatObservedAt(item.priceObservedAt)}</span>}
         {item.availability === "unavailable" && <span>Нет в наличии</span>}
       </div>
       <div className="basket-row-actions">

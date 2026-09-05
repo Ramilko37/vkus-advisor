@@ -16,6 +16,7 @@ interface PlannerState {
   intent: BasketIntent | null;
   variants: BasketVariant[];
   retailerResults: RetailerResult[];
+  catalogWarnings?: string[];
   selectedId: string | null;
   error: AppError | null;
   catalogMode: "live" | "demo" | "connecting";
@@ -34,7 +35,7 @@ type Action =
   | { type: "stage"; stage: WorkflowStage }
   | { type: "message"; message: ChatMessage }
   | { type: "intent"; intent: BasketIntent }
-  | { type: "ready"; intent: BasketIntent; variants: BasketVariant[]; retailerResults: RetailerResult[]; models: string[] }
+  | { type: "ready"; intent: BasketIntent; variants: BasketVariant[]; retailerResults: RetailerResult[]; catalogWarnings?: string[]; models: string[] }
   | { type: "select"; id: string | null }
   | { type: "items"; id: string; items: BasketItem[] }
   | { type: "error"; error: AppError; pendingMessage?: string }
@@ -70,7 +71,7 @@ function reducer(state: PlannerState, action: Action): PlannerState {
     case "intent":
       return { ...state, intent: action.intent, stage: action.intent.needsClarification ? "clarifying" : state.stage };
     case "ready":
-      return { ...state, stage: "ready", intent: action.intent, variants: action.variants, retailerResults: action.retailerResults, selectedId: null, modelNames: [...state.modelNames, ...action.models], error: null };
+      return { ...state, stage: "ready", intent: action.intent, variants: action.variants, retailerResults: action.retailerResults, catalogWarnings: action.catalogWarnings ?? [], selectedId: null, modelNames: [...state.modelNames, ...action.models], error: null };
     case "select":
       return { ...state, selectedId: action.id };
     case "items":
@@ -180,7 +181,7 @@ export function useBasketPlanner(profile: UserProfile = DEFAULT_PROFILE) {
       metrics.fallbackModelUsed = metrics.fallbackModelUsed || result.basketFallbackModelUsed;
       candidatePoolRef.current = { intentFingerprint: fingerprint, products: result.candidates, createdAt: Date.now() };
       if (!isActive()) return;
-      dispatch({ type: "ready", intent: result.intent, variants: result.variants, retailerResults: result.retailerResults, models: [intentResult.model, ...result.models] });
+      dispatch({ type: "ready", intent: result.intent, variants: result.variants, retailerResults: result.retailerResults, catalogWarnings: result.catalogWarnings, models: [intentResult.model, ...result.models] });
       dispatch({ type: "message", message: { id: crypto.randomUUID(), role: "assistant", content: "Готово: собрал три варианта корзины. Выберите подходящий и проверьте состав товаров перед оформлением.", createdAt: Date.now() } });
       metrics.totalMs = Math.round(performance.now() - startedAt);
       console.info("pipeline_metrics", metrics);

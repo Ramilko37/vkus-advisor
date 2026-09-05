@@ -37,6 +37,25 @@ const catalog: CatalogClient = {
 };
 
 describe("composeBaskets", () => {
+  it("shows three explicitly unverified Eats previews per retailer when enabled", async () => {
+    const eats = (["magnit", "perekrestok", "metro", "lenta"] as const).flatMap(retailer => products.slice(0, 4).map(p => ({
+      ...p, id: `yandex_eats:${retailer}_test:${p.id}`, xmlId: `yandex_eats:${retailer}_test:${p.id}`, retailer, catalogProvider: "yandex_eats" as const, retailerPlaceSlug: `${retailer}_test`, isDemo: false,
+    })));
+    const validateBasketItems = vi.fn();
+    const getProductDetails = vi.fn();
+    const previewCatalog: CatalogClient = { ...catalog, mode: "live", allowUnverifiedProducts: true, searchProducts: async () => eats, validateBasketItems, getProductDetails };
+    const llm = { generateStructured: vi.fn().mockRejectedValue(new Error("fallback")) };
+    const result = await composeBaskets(intent, previewCatalog, llm, "test");
+    expect(result.variants).toHaveLength(12);
+    for (const retailer of ["magnit", "perekrestok", "metro", "lenta"]) {
+      const variants = result.variants.filter(v => v.retailer === retailer);
+      expect(variants.map(v => v.strategy)).toEqual(["balanced", "budget", "speed"]);
+      expect(variants.every(v => v.items.every(p => p.retailer === retailer))).toBe(true);
+      expect(variants.every(v => v.warnings.some(w => w.includes("не перепроверены")))).toBe(true);
+    }
+    expect(validateBasketItems).not.toHaveBeenCalled();
+    expect(getProductDetails).not.toHaveBeenCalled();
+  });
   it("keeps candidate-only Eats products out of final baskets, including reused candidates", async () => {
     const direct = products.slice(0, 4).map(p => ({ ...p, retailer: "lenta" as const, catalogProvider: "lenta_direct" as const, isDemo: false }));
     const eats = products.map(p => ({ ...p, id: `yandex_eats:magnit_test:${p.id}`, xmlId: `yandex_eats:magnit_test:${p.id}`, retailer: "magnit" as const, catalogProvider: "yandex_eats" as const, retailerPlaceSlug: "magnit_test", isDemo: false }));

@@ -3,6 +3,21 @@ import { ApiCatalogClient } from "./catalog";
 import { DEFAULT_PROFILE } from "./profileRepository";
 
 describe("ApiCatalogClient", () => {
+  it("enables real Eats preview products only when the server flag is on", async () => {
+    const candidate = { id: "yandex_eats:magnit_test:1", xmlId: "yandex_eats:magnit_test:1", name: "Молоко", retailer: "magnit", catalogProvider: "yandex_eats", priceRub: 100, sourceQuery: "молоко", isDemo: false };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ mode: "live", products: [], candidateProducts: [candidate], yandexEats: { enabled: true, mode: "candidates_only", connected: true } }) }));
+    const client = new ApiCatalogClient();
+    expect(await client.searchProducts({ query: "молоко", purpose: "завтрак", sort: "popularity" })).toEqual([candidate]);
+    expect(client.allowUnverifiedProducts).toBe(true);
+    expect(client.mode).toBe("live");
+    expect(client.warnings).toEqual([]);
+  });
+  it("reports unavailable Eats instead of silently hiding the provider", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ mode: "demo", products: [], yandexEats: { enabled: true, mode: "candidates_only", connected: false } }) }));
+    const client = new ApiCatalogClient();
+    await client.searchProducts({ query: "молоко", purpose: "завтрак", sort: "popularity" });
+    expect(client.warnings).toContain("Товары Яндекс Еды сейчас недоступны. Попробуйте позже.");
+  });
   it("passes normalized candidate-only products to source selection without changing catalog mode", async () => {
     const candidate = { id: "yandex_eats:magnit_test:1", xmlId: "yandex_eats:magnit_test:1", name: "Молоко", retailer: "magnit", catalogProvider: "yandex_eats", priceRub: 100, sourceQuery: "молоко", isDemo: false };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ mode: "demo", products: [], candidateProducts: [candidate] }) }));

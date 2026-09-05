@@ -26,6 +26,12 @@ describe("basket editing", () => {
     const items = [item];
     expect(replaceBasketItem(items, [candidate], item.xmlId)).toBe(items);
   });
+  it("can edit an unverified preview only within the same provider and place", () => {
+    const item = { ...basketItem("yandex_eats:magnit_one:1", "Молоко", 1), retailer: "magnit" as const, catalogProvider: "yandex_eats" as const, retailerPlaceSlug: "magnit_one" };
+    const otherPlace = { ...item, xmlId: "yandex_eats:magnit_two:2", retailerPlaceSlug: "magnit_two" };
+    const replacement = { ...item, xmlId: "yandex_eats:magnit_one:3" };
+    expect(replaceBasketItem([item], [otherPlace, replacement], item.xmlId)[0].xmlId).toBe(replacement.xmlId);
+  });
 });
 
 function basketItem(xmlId: string, name: string, quantity: number): BasketItem {

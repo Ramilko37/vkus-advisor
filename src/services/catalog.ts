@@ -2,28 +2,35 @@ import type { BasketValidationResult, CatalogClient, CatalogValidationItem, Lent
 import { logCatalogProductsSummary, recordLentaCatalogProducts } from "./catalogDebug";
 import { DEFAULT_PROFILE } from "./profileRepository";
 
+interface EatsStatus { enabled: boolean; mode: string; connected: boolean }
+
 export class ApiCatalogClient implements CatalogClient {
   mode: "live" | "demo" = "demo";
+  allowUnverifiedProducts = false;
+  warnings: string[] = [];
 
   constructor(private readonly profile: UserProfile = DEFAULT_PROFILE) {}
 
   async connect(signal?: AbortSignal) {
-    const response = await fetchJson<{ mode: "live" | "demo" }>("/api/catalog/status", { method: "GET", signal });
+    const response = await fetchJson<{ mode: "live" | "demo"; providers?: { yandexEats?: EatsStatus } }>("/api/catalog/status", { method: "GET", signal });
     this.mode = response.mode;
+    this.allowUnverifiedProducts = response.providers?.yandexEats?.enabled === true && response.providers.yandexEats.mode === "candidates_only";
   }
 
   async searchProducts(query: SearchQuery, signal?: AbortSignal) {
     console.info("catalog_search_request", { query: query.query, hasAddress: Boolean(this.profile.address.trim()), lentaStoreId: this.profile.lentaStoreId });
-    const response = await fetchJson<{ mode: "live" | "demo"; products: NormalizedProduct[]; candidateProducts?: NormalizedProduct[] }>("/api/catalog/search", {
+    const response = await fetchJson<{ mode: "live" | "demo"; products: NormalizedProduct[]; candidateProducts?: NormalizedProduct[]; yandexEats?: EatsStatus }>("/api/catalog/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...query, address: this.profile.address.trim() || undefined, ...lentaStorePayload(this.profile) }),
       signal,
     });
     this.mode = response.mode;
+    this.allowUnverifiedProducts = response.yandexEats?.enabled === true && response.yandexEats.mode === "candidates_only";
+    this.warnings = response.yandexEats?.enabled && !response.yandexEats.connected ? ["Товары Яндекс Еды сейчас недоступны. Попробуйте позже."] : [];
     logCatalogProductsSummary("search", response.products, query.query);
     recordLentaCatalogProducts("search", response.products, query.query);
-    // Candidate-only sources travel through normalization/selection, which excludes them from final baskets.
+    // Explicitly enabled candidate-only sources can be shown as unverified previews.
     return [...response.products, ...(response.candidateProducts ?? [])];
   }
 

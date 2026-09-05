@@ -1,7 +1,7 @@
 import type { BasketIntent, CatalogClient, NormalizedProduct } from "../types/domain";
 import { MAX_RAW_CANDIDATES, MAX_SEARCH_QUERIES, MAX_SEARCH_RESULTS_PER_QUERY } from "./candidateSelection";
 import { deduplicateSearchQueries } from "./intentUtils";
-import { selectCatalogProviders } from "./retailerRegistry";
+import { isYandexEatsProduct, selectCatalogProviders } from "./retailerRegistry";
 
 export async function retrieveCandidateProducts(
   intent: BasketIntent,
@@ -14,14 +14,15 @@ export async function retrieveCandidateProducts(
   const validProducts = dedupeProducts(products)
     .filter((product) => product.xmlId && product.name && product.priceRub > 0)
     .filter((product) => !matchesExclusions(product, intent.excludedIngredients));
-  const selectedSources = selectCatalogProviders(validProducts, { finalBaskets: true });
+  const eligible = validProducts.some(product => !product.isDemo) ? validProducts.filter(product => !product.isDemo) : validProducts;
+  const selectedSources = selectCatalogProviders(eligible, { finalBaskets: !catalog.allowUnverifiedProducts });
   const retailerCount = new Set(selectedSources.map(p => p.retailer ?? "demo")).size;
   const deduped = capRawCandidates(selectedSources, Math.max(MAX_RAW_CANDIDATES, retailerCount * MAX_SEARCH_RESULTS_PER_QUERY), MAX_SEARCH_RESULTS_PER_QUERY);
 
   const needsDetails = deduped.some((product) => !product.imageUrl) || intent.excludedIngredients.length > 0 || intent.preferences.some((item) => /белк|калор/i.test(item));
   if (!needsDetails) return deduped;
 
-  const detailTargets = deduped.filter((product) => !product.imageUrl || !product.composition).slice(0, 10);
+  const detailTargets = deduped.filter((product) => !isYandexEatsProduct(product) && (!product.imageUrl || !product.composition)).slice(0, 10);
   const details = await runLimited(detailTargets, 3, (product) => catalog.getProductDetails(product.id, signal));
   const detailMap = new Map<string, Partial<NormalizedProduct>>();
   details.forEach((result, index) => {

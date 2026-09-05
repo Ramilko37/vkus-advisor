@@ -651,7 +651,7 @@ async function handleCatalogSearch(req, res) {
     }
   }
   const yandexEats = yandexEatsAdapter.status();
-  if (liveProducts.length) return send(res, 200, { mode: "live", products: dedupeByXmlId(liveProducts), candidateProducts, yandexEats });
+  if (liveProducts.length || candidateProducts.length) return send(res, 200, { mode: "live", products: dedupeByXmlId(liveProducts), candidateProducts, yandexEats });
   send(res, 200, { mode: "demo", products: searchDemo(query).slice(0, 5), candidateProducts, yandexEats });
 }
 

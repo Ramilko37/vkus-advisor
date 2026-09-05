@@ -8,7 +8,7 @@ import { compactPreviousIntent, normalizeBasketIntent } from "./intentUtils";
 import { measureStage } from "./pipelineMetrics";
 import { retrieveCandidateProducts } from "./retrieveCandidateProducts";
 import type { z } from "zod";
-import { catalogValidationItem, DIRECT_RETAILER_IDS, RETAILER_IDS, selectCatalogProviders } from "./retailerRegistry";
+import { catalogValidationItem, DIRECT_RETAILER_IDS, EATS_PREVIEW_WARNING, isYandexEatsProduct, RETAILER_IDS, selectCatalogProviders } from "./retailerRegistry";
 
 interface LlmClientLike {
   generateStructured<T>(options: {
@@ -30,6 +30,7 @@ export interface ComposeResult {
   candidates: NormalizedProduct[];
   variants: BasketVariant[];
   retailerResults: RetailerResult[];
+  catalogWarnings?: string[];
   models: string[];
   candidatePayloadBytes: number;
   catalogSearchMs: number;
@@ -88,7 +89,7 @@ export async function composeBaskets(
   const search = catalogReused
     ? { result: reusedCandidates ?? [], durationMs: 0 }
     : await measureStage(() => retrieveCandidateProducts(intent, catalog, signal));
-  let candidates = selectCatalogProviders(search.result, { finalBaskets: true });
+  let candidates = selectCatalogProviders(search.result, { finalBaskets: !catalog.allowUnverifiedProducts });
   if (!reusedCandidates && catalog.mode === "demo" && candidates.length < 4) {
     candidates = await retrieveCandidateProducts({ ...intent, searchQueries: fallbackQueries(intent) }, catalog, signal);
   }
@@ -119,6 +120,7 @@ export async function composeBaskets(
     candidates,
     variants,
     retailerResults,
+    catalogWarnings: catalog.warnings ?? [],
     models: [basketResult.model],
     candidatePayloadBytes: candidatePayloadBytes(llmCandidates),
     catalogSearchMs: search.durationMs,
@@ -181,6 +183,7 @@ async function composeRetailerBaskets(
         ...variant,
         id: group.retailer ? `${group.retailer}:${variant.id}` : variant.id,
         retailer: group.retailer,
+        warnings: [...variant.warnings, ...(variant.items.some(isYandexEatsProduct) ? [EATS_PREVIEW_WARNING] : [])],
       }));
     }),
   };
@@ -284,7 +287,7 @@ function fallbackQueries(intent: BasketIntent) {
 }
 
 async function refreshValidatedBasketItems(variants: BasketVariant[], catalog: CatalogClient, signal?: AbortSignal): Promise<BasketVariant[]> {
-  const items = variants.flatMap((variant) => variant.items).filter((item) => VALIDATED_RETAILERS.has(item.retailer));
+  const items = variants.flatMap((variant) => variant.items).filter((item) => !isYandexEatsProduct(item) && VALIDATED_RETAILERS.has(item.retailer));
   if (!items.length || !catalog.validateBasketItems) return variants;
   const uniqueItems = Array.from(new Map(items.map((item) => [item.xmlId, catalogValidationItem(item)])).values());
   try {
@@ -298,7 +301,7 @@ async function refreshValidatedBasketItems(variants: BasketVariant[], catalog: C
     return variants.map((variant) => recalculateVariant({
       ...variant,
       items: variant.items.flatMap((item) => {
-        if (!VALIDATED_RETAILERS.has(item.retailer)) return item;
+        if (isYandexEatsProduct(item) || !VALIDATED_RETAILERS.has(item.retailer)) return item;
         if (unavailable.has(item.xmlId)) return [];
         const product = products.get(item.xmlId);
         return product ? { ...product, quantity: item.quantity, role: item.role, reason: item.reason } : item;

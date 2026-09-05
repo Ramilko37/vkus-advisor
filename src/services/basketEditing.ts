@@ -5,7 +5,7 @@ export function replaceBasketItem(items: BasketItem[], candidates: NormalizedPro
   const current = items.find((item) => item.xmlId === xmlId);
   if (!current) return items;
   const used = new Set(items.map((item) => item.xmlId));
-  const replacement = candidates.find((product) => !used.has(product.xmlId) && !isYandexEatsProduct(product) && sameRetailer(product, current)
+  const replacement = candidates.find((product) => !used.has(product.xmlId) && isYandexEatsProduct(product) === isYandexEatsProduct(current) && sameRetailer(product, current)
     && catalogProviderFor(product) === catalogProviderFor(current) && product.retailerPlaceSlug === current.retailerPlaceSlug);
   if (!replacement) return items;
   return items.map((item) => item.xmlId === xmlId ? {

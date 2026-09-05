@@ -1,5 +1,7 @@
 # Yandex Eats Retail: alpha implementation and live spike
 
+Update 2026-09-05: at the user's request, explicitly enabled `candidates_only` now permits **unverified preview baskets** in the existing UI. Each Eats variant is labelled as preliminary and its price/availability is not claimed to be rechecked. Direct sources retain priority; validation/cart writes remain blocked. The historical implementation notes below describe the initial gate before this UI opt-in. Default configuration remains disabled; production can enable the two documented flags.
+
 Specification: `/Users/rr/Downloads/YandexEatsRetailAdapter-tech-spec.md`.
 Referenced [reverse-engineering notes](https://github.com/Mikhail164th/yandex-delivery) read 2026-09-05; not an official API contract.
 

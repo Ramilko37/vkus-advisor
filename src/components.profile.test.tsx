@@ -319,6 +319,16 @@ describe("ConversationPanel", () => {
 
 describe("BasketResults", () => {
   afterEach(() => cleanup());
+  it("labels Eats preview cards and shows upstream failures on the results screen", () => {
+    const variant = makeVariant("lenta", "balanced", "Молоко");
+    variant.items = variant.items.map(item => ({ ...item, catalogProvider: "yandex_eats", retailerPlaceSlug: "lenta_test", xmlId: `yandex_eats:lenta_test:${item.xmlId}` }));
+    render(<BasketResults planner={{
+      state: { stage: "ready", messages: [], intent: null, variants: [variant], retailerResults: [], selectedId: null, error: null, catalogMode: "live", modelNames: [], pendingMessage: null, catalogWarnings: ["Товары Яндекс Еды сейчас недоступны. Попробуйте позже."] },
+      createCart: vi.fn(), clearVariantSelection: vi.fn(), updateItems: vi.fn(), replaceItem: vi.fn(),
+    } as never} />);
+    expect(screen.getByText(/Предварительная подборка Яндекс Еды: цены и наличие не перепроверены/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Товары Яндекс Еды сейчас недоступны");
+  });
   it("opens an Eats store with honest handoff copy", () => {
     const variant = makeVariant("lenta", "balanced", "Молоко");
     variant.items = variant.items.map(item => ({ ...item, catalogProvider: "yandex_eats", retailerPlaceSlug: "lenta_test", xmlId: `yandex_eats:lenta_test:${item.xmlId}` }));
